@@ -13,6 +13,8 @@ Deno.serve(async req => {
   const defaultOrigins = [
     'https://shanmugaorganics.netlify.app',
     'https://karthickpoorvika2023-arch.github.io',
+    // Current Cloudflare production storefront (exact origin; no wildcard).
+    'https://shop.shanmukiorg.workers.dev',
   ];
   const extraOrigins = env('ADMIN_ALLOWED_ORIGINS').split(',').map(s => s.trim()).filter(Boolean);
   const allowedOrigin = !origin || localOrigin || [...defaultOrigins, ...extraOrigins].includes(origin);
