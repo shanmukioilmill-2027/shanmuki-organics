@@ -3353,9 +3353,9 @@
 
   function renderSettings() {
     var settings = read(AK.settings, {
-      storeName: 'Shanmuga Organics',
-      storeEmail: 'info@shanmugaorganics.com',
-      storePhone: '+91 638 004 0001',
+      storeName: 'Shanmuki Organics',
+      storeEmail: 'shanmukioilmill@gmail.com',
+      storePhone: '+91 866 775 8694',
       address: 'Dharapuram Road, Erode, Tamil Nadu - 638 004',
       currency: 'INR',
       taxRate: 5,
@@ -3370,10 +3370,10 @@
       '<div class="settings-card"><h4>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9.5L5 4h14l2 5.5"/><path d="M4 9.5h16V20H4z"/></svg>' +
       'Store Information</h4>' +
-      '<div class="form-group"><label>Store Name</label><input class="form-control" id="sName" value="' + settings.storeName + '"></div>' +
-      '<div class="form-group"><label>Email</label><input class="form-control" id="sEmail" value="' + settings.storeEmail + '"></div>' +
-      '<div class="form-group"><label>Phone</label><input class="form-control" id="sPhone" value="' + settings.storePhone + '"></div>' +
-      '<div class="form-group"><label>Address</label><textarea class="form-control" id="sAddr">' + settings.address + '</textarea></div>' +
+      '<div class="form-group"><label>Store Name</label><input class="form-control" id="sName" value="' + escHtml(settings.storeName) + '"></div>' +
+      '<div class="form-group"><label>Email</label><input class="form-control" id="sEmail" value="' + escHtml(settings.storeEmail) + '"></div>' +
+      '<div class="form-group"><label>Phone</label><input class="form-control" id="sPhone" value="' + escHtml(settings.storePhone) + '"></div>' +
+      '<div class="form-group"><label>Address</label><textarea class="form-control" id="sAddr">' + escHtml(settings.address) + '</textarea></div>' +
       '<button class="btn-sm btn-sm--primary" id="saveStoreInfo">Save Changes</button>' +
       '</div>' +
 
@@ -3412,6 +3412,10 @@
       '<button type="button" class="pw-eye" data-eye="sPass2" aria-label="Show password" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;cursor:pointer;color:#9aa79b;padding:2px;display:flex;align-items:center">' + PW_EYE_SVG + '</button>' +
       '</div></div>' +
       '<button class="btn-sm btn-sm--primary" id="saveGeneral">Save Changes</button>' +
+      '<div class="form-group mt-16"><label>Admin Login Email (Supabase Auth)</label>' +
+      '<input class="form-control" type="email" id="sAdminLoginEmail" value="shanmukioilmill@gmail.com" autocomplete="off" spellcheck="false">' +
+      '<p style="margin:6px 0 10px;font-size:11px;color:#789">Separate from the public Store Email. This changes the signed-in admin Auth email only after verification. Password stays unchanged.</p>' +
+      '<button class="btn-sm btn-sm--primary" type="button" id="changeAdminLoginEmail">Change Admin Login Email</button></div>' +
       '</div>' +
 
       '<div class="settings-card"><h4>' +
@@ -3425,23 +3429,83 @@
       '</div>' +
       '</div>';
 
-    // Save buttons (Store Info + Payment)
+    // Load the shared Supabase record after the local fallback is drawn.
+    // Avoid replacing fields once the admin has started editing them.
+    var settingsDirty = false;
+    ['sName','sEmail','sPhone','sAddr','sCurr','sTax','sFreeShip','sCod','sOnline'].forEach(function (id) {
+      var el = $('#' + id);
+      if (el) {
+        el.addEventListener('input', function () { settingsDirty = true; });
+        el.addEventListener('change', function () { settingsDirty = true; });
+      }
+    });
+    demoAdminRequest('admin-store-settings', { action: 'read' }).then(function (res) {
+      if (settingsDirty || !$('#sName') || !res || !res.settings) return;
+      var cloud = res.settings;
+      var stored = {
+        storeName: cloud.store_name,
+        storeEmail: cloud.store_email,
+        storePhone: cloud.store_phone,
+        address: cloud.address,
+        currency: cloud.currency,
+        taxRate: cloud.tax_rate,
+        freeShipMin: cloud.free_ship_min,
+        enableCod: cloud.enable_cod,
+        enableOnline: cloud.enable_online
+      };
+      var existing = read(AK.settings, {});
+      write(AK.settings, Object.assign({}, existing, stored));
+      $('#sName').value = stored.storeName;
+      $('#sEmail').value = stored.storeEmail;
+      $('#sPhone').value = stored.storePhone;
+      $('#sAddr').value = stored.address;
+      $('#sTax').value = stored.taxRate;
+      $('#sFreeShip').value = stored.freeShipMin;
+      $('#sCod').checked = stored.enableCod;
+      $('#sOnline').checked = stored.enableOnline;
+      $('#sCurr').value = stored.currency === 'USD' ? 'USD ($)' : 'INR (₹)';
+    }).catch(function () {
+      // Missing migration / Edge Function: local values are displayed as
+      // a draft, but Save below will report failure rather than claiming sync.
+    });
+
+    // Store Information and Payment & Shipping share one server record.
     ['saveStoreInfo', 'savePayment'].forEach(function (id) {
       var btn = $('#' + id);
-      if (btn) btn.addEventListener('click', function () {
+      if (!btn) return;
+      btn.addEventListener('click', function () {
         var s = {
-          storeName: $('#sName').value,
-          storeEmail: $('#sEmail').value,
-          storePhone: $('#sPhone').value,
-          address: $('#sAddr').value,
-          taxRate: parseInt($('#sTax').value) || 5,
-          freeShipMin: parseInt($('#sFreeShip').value) || 999,
+          storeName: $('#sName').value.trim(),
+          storeEmail: $('#sEmail').value.trim(),
+          storePhone: $('#sPhone').value.trim(),
+          address: $('#sAddr').value.trim(),
+          currency: $('#sCurr').value.startsWith('USD') ? 'USD' : 'INR',
+          taxRate: Number($('#sTax').value),
+          freeShipMin: Number($('#sFreeShip').value),
           enableCod: $('#sCod').checked,
           enableOnline: $('#sOnline').checked,
           maintenanceMode: $('#sMaint').checked
         };
-        write(AK.settings, s);
-        toast('Settings saved!');
+        if (!s.storeName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.storeEmail) ||
+            !/^[+0-9 ()-]{6,32}$/.test(s.storePhone) || !s.address ||
+            !Number.isFinite(s.taxRate) || s.taxRate < 0 || s.taxRate > 100 ||
+            !Number.isInteger(s.freeShipMin) || s.freeShipMin < 0) {
+          toast('Please check name, email, phone, address and shipping fields.', 'error');
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        demoAdminRequest('admin-store-settings', { action: 'save', settings: s }).then(function (result) {
+          if (!result || !result.saved) throw new Error('Cloud save was not confirmed');
+          write(AK.settings, s);
+          settingsDirty = false;
+          toast('✅ Saved in Supabase. Storefront visitors will see updated details.');
+        }).catch(function (err) {
+          toast('❌ Not published: ' + (err && err.message || 'Supabase save failed'), 'error');
+        }).finally(function () {
+          btn.disabled = false;
+          btn.textContent = 'Save Changes';
+        });
       });
     });
 
@@ -3451,9 +3515,9 @@
 
       /* 1) Persist settings (merge so other keys are preserved) */
       var s = read(AK.settings, {
-        storeName: 'Shanmuga Organics',
-        storeEmail: 'info@shanmugaorganics.com',
-        storePhone: '+91 638 004 0001',
+        storeName: 'Shanmuki Organics',
+        storeEmail: 'shanmukioilmill@gmail.com',
+        storePhone: '+91 866 775 8694',
         address: 'Dharapuram Road, Erode, Tamil Nadu - 638 004',
         currency: 'INR',
         taxRate: 5,
@@ -3466,7 +3530,7 @@
       write(AK.settings, s);
 
       /* 2) Optional password change — updates the signed-in Supabase
-            admin account (admin@shanmugaorganics.in) */
+            currently signed-in approved admin account */
       var p1 = $('#sPass').value;
       var p2 = $('#sPass2').value;
       if (p1 || p2) {
@@ -3503,6 +3567,32 @@
       toast(s.maintenanceMode
         ? '🛠️ Maintenance Mode ON — the storefront now shows the maintenance screen.'
         : '✅ Settings saved! Store is live.');
+    });
+
+    // Supabase Auth email is a separate identity field, not Store Information.
+    // Explicit action only; verification is handled by Supabase (no password write).
+    $('#changeAdminLoginEmail').addEventListener('click', function () {
+      var btn = this;
+      var newEmail = $('#sAdminLoginEmail').value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        toast('Enter a valid admin email address.', 'error'); return;
+      }
+      var auth = window.SupabaseClient && window.SupabaseClient.auth;
+      if (!auth || typeof auth.updateUser !== 'function') {
+        toast('Supabase Auth is unavailable. Please sign in again.', 'error'); return;
+      }
+      if (!confirm('Request an admin login email change to ' + newEmail + '? Supabase may send verification emails. Your password will not change.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Requesting…';
+      auth.updateUser({ email: newEmail }).then(function (result) {
+        if (result && result.error) throw result.error;
+        toast('✅ Email change requested. Complete the Supabase verification email(s) before signing in with the new address.');
+      }).catch(function (error) {
+        toast('❌ Email change failed: ' + (error && error.message || 'Unknown error'), 'error');
+      }).finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Change Admin Login Email';
+      });
     });
 
     /* Eye toggles for the password fields on this page */
@@ -3826,6 +3916,11 @@
   document.addEventListener('DOMContentLoaded', function () {
     /* Fail closed first: hide the dashboard until a Supabase session exists */
     showAdminGate();
+    // This only changes the displayed login email, never the Auth user/secret.
+    var adminEmailInput = document.getElementById('adminGateEmail');
+    if (adminEmailInput && (!adminEmailInput.value || /^admin@shanmugaorganics\.in$/i.test(adminEmailInput.value.trim()))) {
+      adminEmailInput.value = 'shanmukioilmill@gmail.com';
+    }
 
     ensureAdminLoginService().then(function () { return ensureAdminAuth(); }).catch(function () {
       showAdminGate();

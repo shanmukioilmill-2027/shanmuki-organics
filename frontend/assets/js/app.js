@@ -777,7 +777,7 @@
     const sh = SITE.shop;
     return '' +
       '<div class="topbar"><div class="container topbar__in">' +
-      '<p class="topbar__promo">🌿 Free Shipping on Orders Above ₹999 <span class="sep">|</span> <span class="ta">₹999 மேல் ஆர்டர் செய்யும் போது இலவச டெலிவரி</span></p>' +
+      '<p class="topbar__promo">🌿 Free Shipping on Orders Above ₹' + sh.freeShipOver + ' <span class="sep">|</span> <span class="ta">₹' + sh.freeShipOver + ' மேல் ஆர்டர் செய்யும் போது இலவச டெலிவரி</span></p>' +
       '<div class="topbar__links">' +
       '<a href="track-order.html">Track Order</a><span class="sep">|</span>' +
       '<a href="bulk-enquiry.html">Bulk / Wholesale Enquiry</a><span class="sep">|</span>' +
@@ -785,7 +785,7 @@
       '<span class="topbar__social">' +
       '<a href="https://facebook.com" aria-label="Facebook" target="_blank" rel="noopener">' + ic('fb') + '</a>' +
       '<a href="https://instagram.com" aria-label="Instagram" target="_blank" rel="noopener">' + ic('ig') + '</a>' +
-      '<a href="https://wa.me/916380040002" aria-label="WhatsApp" target="_blank" rel="noopener">' + ic('wa') + '</a>' +
+      '<a href="https://wa.me/' + sh.phoneHref.replace(/\D/g, '') + '" aria-label="WhatsApp" target="_blank" rel="noopener">' + ic('wa') + '</a>' +
       '</span></div></div></div>' +
 
       '<header class="masthead"><div class="container masthead__in">' +
@@ -851,7 +851,7 @@
       '<a href="https://facebook.com" aria-label="Facebook" target="_blank" rel="noopener">' + ic('fb') + '</a>' +
       '<a href="https://instagram.com" aria-label="Instagram" target="_blank" rel="noopener">' + ic('ig') + '</a>' +
       '<a href="https://youtube.com" aria-label="YouTube" target="_blank" rel="noopener">' + ic('yt') + '</a>' +
-      '<a href="https://wa.me/916380040002" aria-label="WhatsApp" target="_blank" rel="noopener">' + ic('wa') + '</a>' +
+      '<a href="https://wa.me/' + sh.phoneHref.replace(/\D/g, '') + '" aria-label="WhatsApp" target="_blank" rel="noopener">' + ic('wa') + '</a>' +
       '</div></div>' +
 
       col('Shop', [['All Products', 'products.html'], ['Oils', 'products.html?cat=cold-pressed-oils'],
@@ -868,9 +868,9 @@
         ['Privacy Policy', 'privacy.html'], ['Store Locator', 'store-locator.html']]) +
 
       '<div><h5>Contact Us</h5><ul class="footer__contact">' +
-      '<li>' + ic('pin') + '<span><b>' + sh.name + '</b><br>' + sh.addr1 + '<br>' + sh.addr2 + '</span></li>' +
-      '<li>' + ic('phone') + '<a href="tel:' + sh.phoneHref + '">' + sh.phone + '</a></li>' +
-      '<li>' + ic('mail') + '<a href="mailto:' + sh.email + '">' + sh.email + '</a></li>' +
+      '<li>' + ic('pin') + '<span><b>' + esc(sh.name) + '</b><br>' + esc(sh.addr1) + '<br>' + esc(sh.addr2) + '</span></li>' +
+      '<li>' + ic('phone') + '<a href="tel:' + esc(sh.phoneHref) + '">' + esc(sh.phone) + '</a></li>' +
+      '<li>' + ic('mail') + '<a href="mailto:' + esc(sh.email) + '">' + esc(sh.email) + '</a></li>' +
       '<li>' + ic('clock') + '<span>' + sh.hours + '</span></li>' +
       '</ul></div>' +
 
@@ -885,7 +885,7 @@
 
       '</div>' +
       '<div class="footbar"><div class="container footbar__in">' +
-      '<span>© 2025 <b>' + sh.name + '</b>. All Rights Reserved.</span>' +
+      '<span>© 2025 <b>' + esc(sh.name) + '</b>. All Rights Reserved.</span>' +
       '<span>Crafted with <span class="heart">♥</span> for Healthy Living</span>' +
       '</div></div></footer>';
   }
@@ -1396,10 +1396,16 @@
     keys: K, read: read, write: write,
     init: function (active) {
       ready(function () {
-        mount(active);
-        wireGlobal();
-        listenForWishAuth();
-        $$('[data-carousel]').forEach(carousel);
+        // Shared public store details load before rendering the footer / cart.
+        // If the database is unreachable the storefront renders safe defaults.
+        var storeReady = window.StorefrontSettings ? window.StorefrontSettings.ready : Promise.resolve();
+        Promise.resolve(storeReady).catch(function () {}).then(function () {
+          mount(active);
+          wireGlobal();
+          listenForWishAuth();
+          $$('[data-carousel]').forEach(carousel);
+          if (window.StorefrontSettings) window.StorefrontSettings.sync();
+        });
       });
     },
     refreshHeaderAvatar: refreshHeaderAvatar

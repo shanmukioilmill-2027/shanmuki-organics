@@ -484,14 +484,14 @@
 
   /* ---------------------------------------------------------- shop info --- */
   const shop = {
-    name: 'Shanmuga Organics',
+    name: 'Shanmuki Organics',
     ta: 'சண்முகி இயற்கை அங்காடி',
     addr1: 'Dharapuram Road, Erode',
     addr2: 'Tamil Nadu - 638 004',
-    phone: '+91 638 004 0001',
-    phoneHref: '+916380040001',
-    whatsapp: '+91 638 004 0002',
-    email: 'info@shanmugaorganics.com',
+    phone: '+91 866 775 8694',
+    phoneHref: '+918667758694',
+    whatsapp: '+91 866 775 8694',
+    email: 'shanmukioilmill@gmail.com',
     wholesaleEmail: 'wholesale@shanmugaorganics.com',
     hours: 'Mon - Sat: 9:00 AM - 7:00 PM',
     hoursTa: 'திங்கள் - சனி: காலை 9 - இரவு 7',

@@ -4,6 +4,7 @@
  * Runtime bindings: SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY.
  */
 const OTP_START_PATH = '/api/signin-otp/start';
+const PUBLIC_STORE_SETTINGS_PATH = '/api/store-settings';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -117,10 +118,38 @@ async function sendSignInOtp(request, env) {
   }
 }
 
+// Read-only storefront settings endpoint (no cookies, no writes, no private keys).
+async function getPublicStoreSettings(request, env) {
+  if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+  const rawUrl = env?.SUPABASE_URL;
+  const key = env?.SUPABASE_PUBLISHABLE_KEY;
+  if (!/^https:\/\/[^/]+\.supabase\.co\/?$/.test(rawUrl || '') || !key) {
+    return json({ error: 'Store settings not configured' }, 503);
+  }
+  try {
+    const url = new URL('/rest/v1/storefront_settings?id=eq.1&select=*', rawUrl);
+    const result = await fetch(url, { headers: { apikey: key, Accept: 'application/json' }, redirect: 'manual' });
+    if (!result.ok) return json({ error: 'Store settings unavailable' }, 503);
+    const rows = await result.json();
+    if (!Array.isArray(rows) || !rows[0]) return json({ error: 'Store settings unavailable' }, 404);
+    const row = rows[0];
+    return json({ settings: {
+      storeName: row.store_name, storeEmail: row.store_email,
+      storePhone: row.store_phone, address: row.address,
+      currency: row.currency, taxRate: row.tax_rate,
+      freeShipMin: row.free_ship_min, enableCod: row.enable_cod,
+      enableOnline: row.enable_online
+    } });
+  } catch {
+    return json({ error: 'Store settings temporarily unavailable' }, 503);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (path === OTP_START_PATH) return sendSignInOtp(request, env);
+    if (path === PUBLIC_STORE_SETTINGS_PATH) return getPublicStoreSettings(request, env);
     if (path.startsWith('/api/')) return json({ error: 'Not found' }, 404);
     return env.ASSETS.fetch(request);
   }

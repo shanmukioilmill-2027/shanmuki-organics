@@ -40,6 +40,42 @@ Deno.serve(async req => {
     if (!admin) return reply({ error: 'Approved admin access required' }, 403, cors);
 
     if (url.pathname.endsWith('/admin-check')) return reply({ admin: true, mode: 'demo' }, 200, cors);
+    // Central store settings: server-side allowlisted admin only. Public read
+    // happens through Supabase RLS; the storefront never receives write access.
+    if (url.pathname.endsWith('/admin-store-settings')) {
+      const raw = await req.text();
+      if (raw.length > 4000) return reply({ error: 'Settings request too large' }, 413, cors);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
+      if (body.action === 'read') {
+        const { data, error } = await client.from('storefront_settings').select('*').eq('id', 1).maybeSingle();
+        if (error) return reply({ error: 'Store settings table unavailable. Apply the SQL migration.' }, 503, cors);
+        return reply({ settings: data }, 200, cors);
+      }
+      if (body.action !== 'save' || !body.settings || typeof body.settings !== 'object' || Array.isArray(body.settings))
+        return reply({ error: 'Invalid settings action' }, 400, cors);
+      const input = body.settings as Record<string, unknown>;
+      const name = safe(input.storeName, 121);
+      const email = safe(input.storeEmail, 255);
+      const phone = safe(input.storePhone, 33);
+      const address = safe(input.address, 501);
+      const currency = input.currency;
+      const taxRate = Number(input.taxRate);
+      const min = Number(input.freeShipMin);
+      if (!name || name.length > 120 || /[<>]/.test(name + address) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 ||
+          !/^[+0-9 ()-]{6,32}$/.test(phone) || !address || address.length > 500 ||
+          !['INR', 'USD'].includes(String(currency)) || !Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100 ||
+          !Number.isInteger(min) || min < 0 || min > 10000000 ||
+          typeof input.enableCod !== 'boolean' || typeof input.enableOnline !== 'boolean')
+        return reply({ error: 'Check store information and shipping settings' }, 400, cors);
+      const payload = { id: 1, store_name: name, store_email: email, store_phone: phone,
+        address, currency, tax_rate: taxRate, free_ship_min: min,
+        enable_cod: input.enableCod, enable_online: input.enableOnline, updated_at: new Date().toISOString() };
+      const { data, error } = await client.from('storefront_settings').upsert(payload, { onConflict: 'id' }).select('*').single();
+      if (error) { console.error('[admin-store-settings] save', error.code); return reply({ error: 'Could not save store settings' }, 500, cors); }
+      return reply({ saved: true, settings: data }, 200, cors);
+    }
+
     // Authenticated and allowlisted admin-only image upload. The browser NEVER
     // receives the service-role key or direct Storage write access.
     if (url.pathname.endsWith('/admin-image-upload')) {

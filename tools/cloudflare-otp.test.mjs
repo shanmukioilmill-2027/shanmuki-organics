@@ -7,7 +7,7 @@ import worker from '../cloudflare-worker.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'));
-assert.equal(config.name, 'shanmuki-organics');
+assert.equal(config.name, 'shop');
 assert.equal(config.assets.directory, './dist');
 assert.equal(config.assets.binding, 'ASSETS');
 assert.ok(config.assets.run_worker_first.includes('/api/*'));
