@@ -1102,6 +1102,14 @@
           return '<button class="hero__dot' + (index === 0 ? ' is-active' : '') +
             '" aria-label="Slide ' + (index + 1) + '" data-dot="' + index + '"></button>';
         }).join('');
+        // A refresh may reduce five active banners to just one. The old track
+        // transform (e.g. translateX(-400%)) would otherwise leave an empty hero.
+        track.style.transform = 'translateX(0%)';
+        var slideControls = root.querySelectorAll('[data-hero-prev], [data-hero-next]');
+        Array.prototype.forEach.call(slideControls, function (control) {
+          control.style.display = hero.length > 1 ? '' : 'none';
+        });
+        dotsWrap.style.display = hero.length > 1 ? '' : 'none';
       }
       root.style.display = hero.length ? '' : 'none';
       root.style.visibility = 'visible';
@@ -1127,7 +1135,8 @@
         }).join('') + '</div>' : '';
       }
       // If all hero slides were paused, stop the timer and remove stale visuals.
-      if (hero.length) { cur = 0; startAuto(); }
+      cur = 0;
+      if (hero.length > 1) startAuto();
       else { stopAuto(); if (bar) bar.style.width = '0%'; }
     }
 
@@ -1216,8 +1225,8 @@
       // arrows
       var prevBtn = root.querySelector('[data-hero-prev]');
       var nextBtn = root.querySelector('[data-hero-next]');
-      if (prevBtn) prevBtn.addEventListener('click', function () { prev(); startAuto(); });
-      if (nextBtn) nextBtn.addEventListener('click', function () { next(); startAuto(); });
+      if (prevBtn) prevBtn.addEventListener('click', function () { prev(); if (total > 1) startAuto(); });
+      if (nextBtn) nextBtn.addEventListener('click', function () { next(); if (total > 1) startAuto(); });
 
       // dots
       root.addEventListener('click', function (event) {

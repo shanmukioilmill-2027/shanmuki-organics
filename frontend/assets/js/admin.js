@@ -3321,7 +3321,7 @@
       '<button class="btn-sm" id="importBrowserBanners" title="One-time import of browser-only Paused/Active changes">Import existing browser banners</button>' +
       '<button class="btn-sm" id="refreshBanners">↻ Refresh</button>' +
       '<button class="btn-sm btn-sm--primary" id="addBannerBtn">+ Add Banner</button></div></div>' +
-      '<p class="small muted">Pause, Activate, Image, Position and Display Order publish to Supabase. Reload the storefront to see the change.</p>' +
+      '<p class="small muted">Live source: Supabase. Old browser-only Pause and image changes are NOT published until you click "Import existing browser banners" once. Refresh this list to verify what is live.</p>' +
       '<div class="product-grid">' + banners.map(function (b, idx) {
         var uid = String(idx);
         return '<div class="product-admin-card">' +
