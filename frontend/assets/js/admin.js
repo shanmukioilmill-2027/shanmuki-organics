@@ -3143,12 +3143,12 @@
       /* Title — full width */
       '<div style="grid-column:1/-1">' +
       '<label class="field-label" for="bTitle">Banner Title *</label>' +
-      '<input id="bTitle" class="field-input" placeholder="Enter banner title" value="' + (b.title || '') + '">' +
+      '<input id="bTitle" class="field-input" placeholder="Enter banner title" value="' + escHtml(b.title || '') + '">' +
       '</div>' +
       /* Link URL */
       '<div>' +
       '<label class="field-label" for="bLink">Link URL</label>' +
-      '<input id="bLink" class="field-input" placeholder="e.g. products.html?cat=oils" value="' + (b.link || '') + '">' +
+      '<input id="bLink" class="field-input" placeholder="e.g. products.html?cat=oils" value="' + escHtml(b.link || '') + '">' +
       '</div>' +
       /* Position */
       '<div>' +
@@ -3177,14 +3177,14 @@
       '<div style="grid-column:1/-1">' +
       '<label class="field-label">Banner Image *</label>' +
       '<input type="file" id="bImgFile" accept="image/*" style="display:none">' +
-      '<input type="hidden" id="bImg" value="' + (b.image || '') + '">' +
+      '<input type="hidden" id="bImg" value="' + escHtml(b.image || '') + '">' +
       '<div id="bImgDropzone" class="img-dropzone"' + (b.image ? ' style="display:none"' : '') + '>' +
       '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#92a096" stroke-width="1.5" style="margin-bottom:6px"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
       '<p style="margin:0;font-size:14px;font-weight:600;color:#4a5548">Click to upload or drag & drop</p>' +
       '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · Recommended 1600×800px</p>' +
       '</div>' +
       '<div id="bImgPreview" class="img-preview"' + (!b.image ? ' style="display:none"' : '') + '>' +
-      '<img id="bImgThumb" src="' + (b.image || '') + '" style="max-height:140px;border-radius:8px;object-fit:cover">' +
+      '<img id="bImgThumb" src="' + escHtml(b.image || '') + '" style="max-height:140px;border-radius:8px;object-fit:cover">' +
       '<span id="bImgInfo" style="font-size:12px;color:#6f7d72;margin-top:6px">Current image</span>' +
       '<button type="button" id="bImgRemove" class="btn-sm btn-sm--danger" style="margin-top:8px">Remove Image</button>' +
       '</div>' +
@@ -3253,111 +3253,166 @@
     };
   }
 
+  /* Banner source of truth: Supabase. Local storage is only for explicit
+     one-time import of existing browser Paused/Active selections. */
+  function bannerApi(action, payload) {
+    return demoAdminRequest('admin-banners', Object.assign({ action: action }, payload || {}));
+  }
+
+  function bannerNormalize(row) {
+    return {
+      id: String(row.slug || row.id || '').toLowerCase(),
+      title: String(row.title || ''),
+      image: String(row.image || ''),
+      link: String(row.link || ''),
+      position: String(row.position || 'hero'),
+      order: Number(row.order || 1),
+      active: row.active === true
+    };
+  }
+
+  function bannerUploadIfNeeded(image) {
+    if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(image)) return Promise.resolve(image);
+    return demoAdminRequest('admin-image-upload', { image: image }).then(function (result) {
+      if (!result.url) throw new Error('Banner image upload did not return a URL.');
+      return result.url;
+    });
+  }
+
+  function bannerSaveFromModal(modal, banner, notice) {
+    var button = modal.querySelector('[data-save]');
+    if (button) { button.disabled = true; button.textContent = 'Saving…'; }
+    bannerUploadIfNeeded(banner.image).then(function (url) {
+      banner.image = url;
+      return bannerApi('upsert', { banner: {
+        slug: banner.id, title: banner.title, link: banner.link, image: banner.image,
+        position: banner.position, order: banner.order, active: banner.active
+      } });
+    }).then(function () {
+      modal.remove();
+      toast(notice);
+      renderBanners();
+    }).catch(function (err) {
+      toast('Banner was NOT saved: ' + (err.message || String(err)), 'error');
+    }).finally(function () { if (button && button.isConnected) { button.disabled = false; button.textContent = 'Save'; } });
+    // openModal requires `false` while the authenticated network request completes.
+    return false;
+  }
+
   function renderBanners() {
-    var banners = data.banners();
+    content.innerHTML = '<p role="status">Loading banners from Supabase…</p>';
+    bannerApi('list').then(function (result) {
+      if (pageTitle.textContent !== 'Banners') return;
+      renderBannerList((result.banners || []).map(bannerNormalize));
+    }).catch(function (err) {
+      if (pageTitle.textContent !== 'Banners') return;
+      content.innerHTML = '<div style="padding:22px;border:1px solid #f1d7b7;border-radius:12px">' +
+        '<h3>Could not load banners from Supabase</h3><p>' + escHtml(err.message || String(err)) + '</p>' +
+        '<p class="small muted">Apply backend/schemas/supabase-banners-secure-sync.sql and deploy the updated demo-payment-kit Edge Function. Local browser changes are not live.</p>' +
+        '<button type="button" class="btn-sm" id="retryBanners">Retry</button></div>';
+      var retry = $('#retryBanners'); if (retry) retry.addEventListener('click', renderBanners);
+    });
+  }
+
+  function renderBannerList(banners) {
     content.innerHTML =
-      '<div class="page-toolbar"><h3 style="font-size:15px;font-weight:600">' + banners.length + ' Banners</h3>' +
-      '<button class="btn-sm btn-sm--primary" id="addBannerBtn">+ Add Banner</button></div>' +
+      '<div class="page-toolbar"><h3 style="font-size:15px;font-weight:600">' + banners.length + ' Banners · Saved in Supabase</h3>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button class="btn-sm" id="importBrowserBanners" title="One-time import of browser-only Paused/Active changes">Import existing browser banners</button>' +
+      '<button class="btn-sm" id="refreshBanners">↻ Refresh</button>' +
+      '<button class="btn-sm btn-sm--primary" id="addBannerBtn">+ Add Banner</button></div></div>' +
+      '<p class="small muted">Pause, Activate, Image, Position and Display Order publish to Supabase. Reload the storefront to see the change.</p>' +
       '<div class="product-grid">' + banners.map(function (b, idx) {
-        var uid = b.id + '__' + idx;
+        var uid = String(idx);
         return '<div class="product-admin-card">' +
-          '<div class="product-admin-card__img" style="height:160px"><img src="' + b.image + '" alt="' + b.title + '" onerror="this.style.display=\'none\'"></div>' +
+          '<div class="product-admin-card__img" style="height:160px"><img src="' + escHtml(b.image) + '" alt="' + escHtml(b.title) + '" loading="lazy" onerror="this.style.display=\'none\'"></div>' +
           '<div class="product-admin-card__body">' +
-          '<div class="product-admin-card__name">' + b.title + '</div>' +
-          '<div class="product-admin-card__cat">Position: ' + b.position + ' · Order: ' + b.order + '</div>' +
-          (b.link ? '<div style="font-size:11px;color:var(--blue);margin-top:4px;word-break:break-all">' + b.link + '</div>' : '') +
+          '<div class="product-admin-card__name">' + escHtml(b.title) + '</div>' +
+          '<div class="product-admin-card__cat">Position: ' + escHtml(b.position) + ' · Order: ' + b.order + '</div>' +
+          (b.link ? '<div style="font-size:11px;color:var(--blue);margin-top:4px;word-break:break-all">' + escHtml(b.link) + '</div>' : '') +
           '<div class="product-admin-card__meta" style="margin-top:8px">' +
-          '<span class="product-admin-card__stock ' + (b.active ? 'in' : 'out') + '">' + (b.active ? '● Active' : '● Paused') + '</span>' +
-          '</div>' +
+          '<span class="product-admin-card__stock ' + (b.active ? 'in' : 'out') + '">' + (b.active ? '● Active' : '● Paused') + '</span></div>' +
           '<div class="product-admin-card__actions">' +
           '<button class="btn-sm" data-edit-banner="' + uid + '">✏️ Edit</button>' +
           '<button class="btn-sm" data-toggle-banner="' + uid + '">' + (b.active ? '⏸️ Pause' : '▶️ Activate') + '</button>' +
           '<button class="btn-sm btn-sm--danger" data-del-banner="' + uid + '">🗑️ Delete</button>' +
-          '</div>' +
-          '</div></div>';
+          '</div></div></div>';
       }).join('') + '</div>';
 
-    // Build lookup
-    var bannerByUid = {};
-    banners.forEach(function (b, idx) { bannerByUid[b.id + '__' + idx] = b; });
+    $('#refreshBanners').addEventListener('click', renderBanners);
 
-    // Add Banner
+    $('#importBrowserBanners').addEventListener('click', function () {
+      var local = read(AK.banners, null);
+      if (!Array.isArray(local) || !local.length) {
+        toast('No local banner history in this browser. Nothing to import.', 'warn'); return;
+      }
+      if (!confirm('Import ' + local.length + ' old browser banners and their Paused/Active settings into Supabase? Existing banners with matching IDs will be updated.')) return;
+      var btn = this; btn.disabled = true;
+      Promise.all(local.map(function (b) {
+        return bannerUploadIfNeeded(String(b.image || '')).then(function (url) {
+          return { slug: String(b.id || '').toLowerCase(), title: b.title, link: b.link || '', image: url,
+            position: b.position || 'hero', order: Number(b.order || 1), active: b.active === true };
+        });
+      })).then(function (rows) { return bannerApi('import', { banners: rows }); }).then(function () {
+        toast('Existing browser banners imported. Paused status retained.'); renderBanners();
+      }).catch(function (err) {
+        toast('Import failed: ' + (err.message || String(err)), 'error');
+      }).finally(function () { if (btn.isConnected) btn.disabled = false; });
+    });
+
     $('#addBannerBtn').addEventListener('click', function () {
       var modal = openModal('Add New Banner', getBannerFormHTML(), function (m) {
         var banner = readBannerForm(m);
         if (!banner) return false;
-        banner.id = 'B' + Date.now();
-        var all = data.banners();
-        all.push(banner);
-        var saved = write(AK.banners, all);
-        if (!saved) {
-          banner.image = '';
-          all[all.length - 1] = banner;
-          if (!write(AK.banners, all)) { toast('Storage full', 'error'); return false; }
-          toast('Banner saved without image', 'warn');
-        } else {
-          toast('Banner "' + banner.title + '" added!');
-        }
-        renderBanners();
+        banner.id = 'b' + Date.now();
+        return bannerSaveFromModal(m, banner, 'Banner published to Supabase.');
       });
       initBannerImgUpload(modal);
     });
 
-    // Edit Banner
-    $$('[data-edit-banner]', content).forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var uid = btn.getAttribute('data-edit-banner');
-        var b = bannerByUid[uid];
-        if (!b) return;
-        var modal = openModal('Edit Banner', getBannerFormHTML(b), function (m) {
+    $$('[data-edit-banner]', content).forEach(function (button) {
+      button.addEventListener('click', function () {
+        var old = banners[Number(button.getAttribute('data-edit-banner'))];
+        if (!old) return;
+        var modal = openModal('Edit Banner', getBannerFormHTML(old), function (m) {
           var updated = readBannerForm(m);
           if (!updated) return false;
-          var all = data.banners();
-          for (var i = 0; i < all.length; i++) {
-            if (all[i].id === b.id) { updated.id = b.id; all[i] = updated; break; }
-          }
-          write(AK.banners, all);
-          toast('Banner "' + updated.title + '" updated!');
-          renderBanners();
+          updated.id = old.id;
+          return bannerSaveFromModal(m, updated, 'Banner updated in Supabase.');
         });
         initBannerImgUpload(modal);
       });
     });
 
-    // Toggle Pause/Activate
-    $$('[data-toggle-banner]', content).forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var uid = btn.getAttribute('data-toggle-banner');
-        var b = bannerByUid[uid];
+    $$('[data-toggle-banner]', content).forEach(function (button) {
+      button.addEventListener('click', function () {
+        var b = banners[Number(button.getAttribute('data-toggle-banner'))];
         if (!b) return;
-        var all = data.banners();
-        var newState = !b.active;
-        all.forEach(function (x) { if (x.id === b.id) x.active = newState; });
-        write(AK.banners, all);
-        toast(newState ? '▶️ Banner activated' : '⏸️ Banner paused');
-        renderBanners();
+        button.disabled = true;
+        bannerApi('toggle', { slug: b.id, active: !b.active }).then(function () {
+          toast(b.active ? 'Banner paused on storefront.' : 'Banner activated on storefront.');
+          renderBanners();
+        }).catch(function (err) {
+          toast('Status NOT saved: ' + (err.message || String(err)), 'error');
+        }).finally(function () { if (button.isConnected) button.disabled = false; });
       });
     });
 
-    // Delete Banner
-    $$('[data-del-banner]', content).forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var uid = btn.getAttribute('data-del-banner');
-        var b = bannerByUid[uid];
+    $$('[data-del-banner]', content).forEach(function (button) {
+      button.addEventListener('click', function () {
+        var b = banners[Number(button.getAttribute('data-del-banner'))];
         if (!b) return;
         openModal('Delete Banner',
-          '<div style="text-align:center;padding:10px 0">' +
-          '<svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#dc3545" stroke-width="1.5" style="margin:0 auto 12px"><path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.4h9.2L17.5 7"/></svg>' +
-          '<h4 style="font-size:16px;margin-bottom:6px">Delete "' + b.title + '"?</h4>' +
-          '<p style="color:#6f7d72;font-size:13px">This banner will be permanently removed.</p></div>',
-          function () {
-            var all = data.banners().filter(function (x) { return x.id !== b.id; });
-            write(AK.banners, all);
-            toast('Banner "' + b.title + '" deleted.');
-            renderBanners();
-          },
-          'Delete'
-        );
+          '<p>Delete <b>' + escHtml(b.title) + '</b> from Supabase? This cannot be undone.</p>', function (m) {
+            var saveButton = m.querySelector('[data-save]');
+            if (saveButton) saveButton.disabled = true;
+            bannerApi('delete', { slug: b.id }).then(function () {
+              m.remove(); toast('Banner deleted from Supabase.'); renderBanners();
+            }).catch(function (err) {
+              toast('Delete failed: ' + (err.message || String(err)), 'error');
+            }).finally(function () { if (saveButton && saveButton.isConnected) saveButton.disabled = false; });
+            return false;
+          }, 'Delete');
       });
     });
   }

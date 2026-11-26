@@ -1040,46 +1040,116 @@
     var root = document.getElementById('heroSlider');
     if (!root) return;
 
-    /* ---- sync with admin banners from localStorage ---- */
-    try {
-      var raw = localStorage.getItem('so_admin_banners_v1');
-      if (raw) {
-        var banners = JSON.parse(raw);
-        // Only show active hero-position banners
-        var heroBanners = banners.filter(function (b) { return b.active && b.position === 'hero'; });
-        heroBanners.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    // Real banner state lives in Supabase, not in this browser's localStorage.
+    // Hide bundled fallback slides until the source of truth has been read;
+    // a paused banner must never flash in the live carousel.
+    root.style.visibility = 'hidden';
+    var templates = [].slice.call(root.querySelectorAll('.hero__slide')).map(function (node) {
+      return node.cloneNode(true);
+    });
+    var promoGrid = document.querySelector('.container.promos');
+    var promoSection = promoGrid && promoGrid.closest('section');
+    if (promoSection) promoSection.style.visibility = 'hidden';
+    var sidebarZone = document.getElementById('adminBannerSidebar');
+    if (!sidebarZone && promoSection) {
+      sidebarZone = document.createElement('section');
+      sidebarZone.id = 'adminBannerSidebar';
+      sidebarZone.className = 'sec sec--tight admin-banner-sidebar-section';
+      sidebarZone.hidden = true;
+      promoSection.insertAdjacentElement('afterend', sidebarZone);
+    }
 
-        if (heroBanners.length > 0) {
-          var track = root.querySelector('.hero__track');
-          var dotsWrap = root.querySelector('[data-hero-dots]');
-          if (track && dotsWrap) {
-            // Rebuild slides
-            track.innerHTML = heroBanners.map(function (b, i) {
-              var link = b.link || 'products.html';
-              return '<div class="hero__slide' + (i === 0 ? ' is-active' : '') + '" data-slide="' + i + '">' +
-                '<img class="hero__bg" src="' + b.image + '" alt="' + b.title + '" loading="' + (i === 0 ? 'eager' : 'lazy') + '">' +
-                '<div class="hero__overlay"></div>' +
-                '<div class="container hero__in">' +
-                  '<div class="hero__copy">' +
-                    '<span class="hero__badge">🌿 Shanmugi Organics</span>' +
-                    '<h2 class="hero__title">' + b.title + '</h2>' +
-                    '<div class="hero__cta">' +
-                      '<a class="btn btn--primary btn--lg" href="' + link + '">Shop Now</a>' +
-                      '<a class="btn btn--glass btn--lg" href="products.html">View All</a>' +
-                    '</div>' +
-                  '</div>' +
-                '</div>' +
-              '</div>';
-            }).join('');
+    function bannerHref(value) {
+      var link = String(value || 'products.html');
+      return /^(?:[a-z0-9_-]+\.html(?:\?[a-z0-9_=&%-]+)?|https:\/\/[^\s"'<>]+)$/i.test(link) ? link : 'products.html';
+    }
 
-            // Rebuild dots
-            dotsWrap.innerHTML = heroBanners.map(function (b, i) {
-              return '<button class="hero__dot' + (i === 0 ? ' is-active' : '') + '" aria-label="Slide ' + (i + 1) + '" data-dot="' + i + '"></button>';
-            }).join('');
+    function renderBanners(rows) {
+      var active = rows.filter(function (b) { return b && b.active === true; });
+      active.sort(function (a, b) { return Number(a.order || 0) - Number(b.order || 0); });
+      var hero = active.filter(function (b) { return b.position === 'hero'; });
+      var track = root.querySelector('.hero__track');
+      var dotsWrap = root.querySelector('[data-hero-dots]');
+      if (track && dotsWrap) {
+        track.innerHTML = '';
+        hero.forEach(function (b, index) {
+          var templateNo = /^b0?[1-5]$/i.test(b.slug) ? Number(b.slug.slice(1)) - 1 : -1;
+          var slide = templateNo >= 0 && templates[templateNo] ? templates[templateNo].cloneNode(true) : null;
+          if (!slide) {
+            slide = document.createElement('div');
+            slide.innerHTML = '<img class="hero__bg" loading="lazy" alt="">' +
+              '<div class="hero__overlay"></div><div class="container hero__in"><div class="hero__copy">' +
+              '<span class="hero__badge">🌿 Shanmuki Organics</span><h2 class="hero__title"></h2>' +
+              '<div class="hero__cta"><a class="btn btn--primary btn--lg" href="products.html">Shop Now</a></div>' +
+              '</div></div>';
           }
-        }
+          slide.className = 'hero__slide' + (index === 0 ? ' is-active' : '');
+          slide.setAttribute('data-slide', String(index));
+          var bg = slide.querySelector('.hero__bg');
+          if (bg) { bg.src = b.image; bg.alt = b.title || ''; bg.loading = index === 0 ? 'eager' : 'lazy'; }
+          var title = slide.querySelector('.hero__title');
+          if (title) {
+            // Keep original Tamil subheading and original hero styling.
+            var label = [].slice.call(title.childNodes).find(function (n) { return n.nodeType === 3; });
+            if (label) label.nodeValue = String(b.title || '');
+            else title.insertBefore(document.createTextNode(String(b.title || '')), title.firstChild);
+          }
+          var cta = slide.querySelector('.hero__cta a');
+          if (cta) cta.href = bannerHref(b.link);
+          track.appendChild(slide);
+        });
+        dotsWrap.innerHTML = hero.map(function (_b, index) {
+          return '<button class="hero__dot' + (index === 0 ? ' is-active' : '') +
+            '" aria-label="Slide ' + (index + 1) + '" data-dot="' + index + '"></button>';
+        }).join('');
       }
-    } catch (e) { /* ignore */ }
+      root.style.display = hero.length ? '' : 'none';
+      root.style.visibility = 'visible';
+
+      if (promoGrid) {
+        var promos = active.filter(function (b) { return b.position === 'promo'; });
+        promoGrid.innerHTML = promos.map(function (b, index) {
+          var colors = ['promo--dark', 'promo--cream', 'promo--light'];
+          return '<a class="promo admin-banner-promo ' + colors[index % colors.length] +
+            '" href="' + esc(bannerHref(b.link)) + '">' +
+            '<img class="admin-banner-promo__image" src="' + esc(b.image) + '" alt="' + esc(b.title) + '" loading="lazy">' +
+            '<span class="admin-banner-promo__shade"></span><span class="admin-banner-promo__title">' + esc(b.title) + '</span></a>';
+        }).join('');
+        if (promoSection) { promoSection.style.display = promos.length ? '' : 'none'; promoSection.style.visibility = 'visible'; }
+      }
+      if (sidebarZone) {
+        var right = active.filter(function (b) { return b.position === 'sidebar'; });
+        sidebarZone.hidden = !right.length;
+        sidebarZone.innerHTML = right.length ? '<div class="container admin-banner-sidebar-list">' + right.map(function (b) {
+          return '<a class="admin-banner-sidebar" href="' + esc(bannerHref(b.link)) + '">' +
+            '<img src="' + esc(b.image) + '" alt="' + esc(b.title) + '" loading="lazy">' +
+            '<strong>' + esc(b.title) + '</strong></a>';
+        }).join('') + '</div>' : '';
+      }
+      // If all hero slides were paused, stop the timer and remove stale visuals.
+      if (hero.length) { cur = 0; startAuto(); }
+      else { stopAuto(); if (bar) bar.style.width = '0%'; }
+    }
+
+    function fetchLiveBanners() {
+      return ensureSupabase().then(function () {
+        if (!window.SupabaseClient) throw new Error('Supabase client unavailable');
+        return window.SupabaseClient.from('banners')
+          .select('slug,title,link,image,position,"order",active').eq('active', true)
+          .order('order', { ascending: true });
+      }).then(function (result) {
+        if (result.error) throw result.error;
+        renderBanners(result.data || []);
+      }).catch(function (error) {
+        // Fail closed: do NOT show hard-coded banners that may be paused.
+        console.warn('[banners] Could not load public banner state:', error && error.message);
+        root.style.display = 'none';
+        root.style.visibility = 'visible';
+        stopAuto();
+        if (promoSection) { promoSection.style.display = 'none'; promoSection.style.visibility = 'visible'; }
+        if (sidebarZone) sidebarZone.hidden = true;
+      });
+    }
 
     var slides = root.querySelectorAll('.hero__slide');
     var dots   = root.querySelectorAll('.hero__dot');
@@ -1133,12 +1203,10 @@
 
     /* Start the timer FIRST so the slideshow always runs, then attach
        the interactive controls — any error there can't stop playback. */
-    if (root.querySelectorAll('.hero__slide').length) {
-      startAuto();
-      console.log('[hero] slideshow started');
-    } else {
-      console.warn('[hero] no .hero__slide elements found');
-    }
+    // The live Supabase fetch decides which slides are active before auto-play.
+    fetchLiveBanners();
+    // Recheck while the home page is open; no reload required after an admin save.
+    setInterval(function () { if (!document.hidden) fetchLiveBanners(); }, 60000);
 
     try {
       // pause on hover
@@ -1152,11 +1220,11 @@
       if (nextBtn) nextBtn.addEventListener('click', function () { next(); startAuto(); });
 
       // dots
-      dots.forEach(function (d) {
-        d.addEventListener('click', function () {
-          go(parseInt(d.getAttribute('data-dot'), 10));
-          startAuto();
-        });
+      root.addEventListener('click', function (event) {
+        var d = event.target && event.target.closest('[data-dot]');
+        if (!d || !root.contains(d)) return;
+        go(parseInt(d.getAttribute('data-dot'), 10));
+        startAuto();
       });
 
       // keyboard

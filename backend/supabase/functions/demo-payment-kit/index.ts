@@ -19,7 +19,7 @@ Deno.serve(async req => {
   const extraOrigins = env('ADMIN_ALLOWED_ORIGINS').split(',').map(s => s.trim()).filter(Boolean);
   const allowedOrigin = !origin || localOrigin || [...defaultOrigins, ...extraOrigins].includes(origin);
   const url = new URL(req.url);
-  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload|store-settings|site-content)$/.test(
+  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload|store-settings|site-content|banners)$/.test(
     url.pathname.replace(/^.*\/demo-payment-kit/, '')
   );
   // Never expose demo checkout to hosted origins.
@@ -40,6 +40,72 @@ Deno.serve(async req => {
     if (!admin) return reply({ error: 'Approved admin access required' }, 403, cors);
 
     if (url.pathname.endsWith('/admin-check')) return reply({ admin: true, mode: 'demo' }, 200, cors);
+    // Approved-admin banner CRUD. All writes are made with the server-only service role.
+    // The storefront reads active rows through the separate read-only RLS policy.
+    if (url.pathname.endsWith('/admin-banners')) {
+      const raw = await req.text();
+      if (raw.length > 180000) return reply({ error: 'Banner request too large' }, 413, cors);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
+      const list = async () => {
+        const { data, error } = await client.from('banners').select('slug,title,link,image,position,"order",active')
+          .order('order', { ascending: true }).order('slug', { ascending: true });
+        if (error) { console.error('[admin-banners] list', error.code); return reply({ error: 'Banners table is not ready. Apply the secure banners SQL migration.' }, 503, cors); }
+        return reply({ banners: data || [] }, 200, cors);
+      };
+      if (body.action === 'list') return await list();
+      const validSlug = (v: unknown) => typeof v === 'string' && /^b[a-z0-9-]{1,48}$/i.test(v);
+      const validLink = (v: unknown) => typeof v === 'string' && v.length <= 512 &&
+        (v === '' || /^(?:[a-z0-9_-]+\.html(?:\?[a-z0-9_=&%-]+)?|https:\/\/[^\s"'<>]+)$/i.test(v));
+      const validImage = (v: unknown) => typeof v === 'string' && v.length <= 1600 &&
+        (/^assets\/img\/[a-z0-9_./-]+\.(?:png|jpg|jpeg|webp|svg)$/i.test(v) || /^https:\/\/[^\s"'<>]+$/i.test(v));
+      const clean = (value: unknown) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        const b = value as Record<string, unknown>;
+        const slug = String(b.slug || '').toLowerCase();
+        const title = safe(b.title, 120);
+        const position = String(b.position || '');
+        const order = Number(b.order);
+        if (!validSlug(slug) || !title || title.length > 120 || /[<>]/.test(title) ||
+            !validImage(b.image) || !validLink(b.link) || !['hero', 'promo', 'sidebar'].includes(position) ||
+            !Number.isInteger(order) || order < 1 || order > 100 || typeof b.active !== 'boolean') return null;
+        return { slug, title, link: b.link || '', image: b.image, position, order, active: b.active,
+          updated_at: new Date().toISOString() };
+      };
+      if (body.action === 'upsert') {
+        const item = clean(body.banner);
+        if (!item) return reply({ error: 'Invalid banner. Upload the image before saving.' }, 400, cors);
+        const { error } = await client.from('banners').upsert(item, { onConflict: 'slug' });
+        if (error) { console.error('[admin-banners] upsert', error.code); return reply({ error: 'Could not save banner' }, 500, cors); }
+        return reply({ saved: true }, 200, cors);
+      }
+      if (body.action === 'toggle') {
+        if (!validSlug(body.slug) || typeof body.active !== 'boolean') return reply({ error: 'Invalid banner status' }, 400, cors);
+        const { data, error } = await client.from('banners').update({ active: body.active, updated_at: new Date().toISOString() })
+          .eq('slug', String(body.slug).toLowerCase()).select('slug').maybeSingle();
+        if (error || !data) return reply({ error: 'Could not update banner status' }, error ? 500 : 404, cors);
+        return reply({ saved: true }, 200, cors);
+      }
+      if (body.action === 'delete') {
+        if (!validSlug(body.slug)) return reply({ error: 'Invalid banner ID' }, 400, cors);
+        const { error } = await client.from('banners').delete().eq('slug', String(body.slug).toLowerCase());
+        if (error) return reply({ error: 'Could not delete banner' }, 500, cors);
+        return reply({ deleted: true }, 200, cors);
+      }
+      if (body.action === 'import') {
+        // Explicit one-time migration from this browser's existing paused/active state.
+        if (!Array.isArray(body.banners) || body.banners.length > 50) return reply({ error: 'Invalid import list' }, 400, cors);
+        const records = body.banners.map(clean);
+        if (records.some(x => !x) || !records.length || new Set(records.map(x => x!.slug)).size !== records.length)
+          return reply({ error: 'Invalid import banners or duplicate IDs' }, 400, cors);
+        const { error } = await client.from('banners').upsert(records, { onConflict: 'slug' });
+        if (error) return reply({ error: 'Could not import banners' }, 500, cors);
+        return reply({ imported: records.length }, 200, cors);
+      }
+      return reply({ error: 'Unknown banners action' }, 400, cors);
+    }
+
+
     // Existing Auth session + ownpay_payment_admins UID was verified above.
     // A customer with a valid login may NOT publish website changes.
     if (url.pathname.endsWith('/admin-site-content')) {
