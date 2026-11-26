@@ -418,7 +418,7 @@ Deno.serve(async req => {
     // No PUBLIC/anon/authenticated write grant is required on public.categories.
     if (url.pathname.endsWith('/admin-categories')) {
       const { data, error } = await client.from('categories')
-        .select('id, name, name_tamil, slug, description, icon, image_url, order_index')
+        .select('id, name, name_tamil, slug, description, icon, image_url, image_alignment, order_index')
         .order('order_index', { ascending: true }).order('name', { ascending: true }).limit(500);
       if (error) { console.error('[admin-categories] list', error); return reply({ error: 'Could not load categories (' + error.code + ')' }, 500, cors); }
       return reply({ categories: data || [] }, 200, cors);
@@ -440,13 +440,27 @@ Deno.serve(async req => {
       if (image_url.length > 280000 ||
           (image_url && !/^(data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+|https:\/\/[^\s]+|assets\/img\/[A-Za-z0-9_./-]+)$/.test(image_url)))
         return reply({ error: 'Invalid or oversized category image' }, 400, cors);
-      const payload = { name, name_tamil, description, image_url: image_url || null };
+      const inputAlignment = incoming.image_alignment;
+      if (inputAlignment !== undefined && (typeof inputAlignment !== 'object' || inputAlignment === null || Array.isArray(inputAlignment)))
+        return reply({ error: 'Invalid category image alignment' }, 400, cors);
+      const align = inputAlignment as Record<string, unknown> | undefined;
+      function alignValue(v: unknown, min: number, max: number, fallback: number): number | null {
+        if (v === undefined || v === null || v === '') return fallback;
+        if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v < min || v > max) return null;
+        return v;
+      }
+      const scale = alignValue(align?.scale, 50, 160, 100);
+      const x = alignValue(align?.x, -50, 50, 0);
+      const y = alignValue(align?.y, -50, 50, 0);
+      if (scale === null || x === null || y === null) return reply({ error: 'Category image alignment out of range' }, 400, cors);
+      const image_alignment = { scale, x, y };
+      const payload = { name, name_tamil, description, image_url: image_url || null, image_alignment };
       const originalSlug = safe(body.originalSlug, 90);
       if (originalSlug) {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(originalSlug) || slug !== originalSlug)
           return reply({ error: 'Changing existing category slugs is not supported' }, 400, cors);
         const { data, error } = await client.from('categories').update(payload)
-          .eq('slug', originalSlug).select('id, name, name_tamil, slug, description, icon, image_url, order_index').maybeSingle();
+          .eq('slug', originalSlug).select('id, name, name_tamil, slug, description, icon, image_url, image_alignment, order_index').maybeSingle();
         if (error) { console.error('[admin-categories] update', error); return reply({ error: 'Category update failed (' + error.code + ')' }, 500, cors); }
         if (!data) return reply({ error: 'Category not found. Reload and try again.' }, 404, cors);
         return reply({ category: data }, 200, cors);
@@ -456,7 +470,7 @@ Deno.serve(async req => {
       if (orderError) { console.error('[admin-categories] order', orderError); return reply({ error: 'Could not determine category order' }, 500, cors); }
       const order_index = (Number(last?.[0]?.order_index) || 0) + 1;
       const { data, error } = await client.from('categories')
-        .insert({ ...payload, slug, order_index }).select('id, name, name_tamil, slug, description, icon, image_url, order_index').single();
+        .insert({ ...payload, slug, order_index }).select('id, name, name_tamil, slug, description, icon, image_url, image_alignment, order_index').single();
       if (error) {
         console.error('[admin-categories] insert', error);
         return reply({ error: error.code === '23505' ? 'Category slug already exists' : 'Category insert failed (' + error.code + ')' }, error.code === '23505' ? 409 : 500, cors);

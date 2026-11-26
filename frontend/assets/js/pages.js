@@ -59,7 +59,7 @@
       track.innerHTML = SITE.categories.map(function (c) {
         const n = SITE.incat(c.slug).length;
         const imgSrc = c.img ? c.img : 'assets/img/categories/' + c.slug + '.svg';
-        const imgStyle = c.img ? 'width:100%;height:100%;object-fit:cover;border-radius:50%' : '';
+        const imgStyle = c.img ? 'width:100%;height:100%;object-fit:cover;border-radius:50%;transform-origin:center center;transform:' + SITE.categoryImageTransform(c.image_alignment) : '';
         const fallback = 'assets/img/categories/' + c.slug + '.svg';
         return '<a class="catcard" href="products.html?cat=' + c.slug + '" data-cat-slug="' + c.slug + '">' +
           '<span class="catcard__img"><img src="' + imgSrc + '" alt="' + esc(c.name) + '" loading="lazy" style="' + imgStyle + '" data-fallback="' + fallback + '"></span>' +

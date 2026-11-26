@@ -544,6 +544,18 @@
     var n = Number(v);
     return v !== null && v !== undefined && v !== '' && Number.isFinite(n) ? n : fallback;
   }
+  function categoryAlignment(v) {
+    v = v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    function clamp(n, min, max, fallback) {
+      n = Number(n);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
+    }
+    return { scale:clamp(v.scale,50,160,100),x:clamp(v.x,-50,50,0),y:clamp(v.y,-50,50,0) };
+  }
+  function categoryImageTransform(v) {
+    var a = categoryAlignment(v);
+    return 'translate(' + a.x + '%, ' + a.y + '%) scale(' + (a.scale / 100) + ')';
+  }
   function catalogCategory(row) {
     var old = originalCategories.get(row.slug) || {};
     return {
@@ -551,7 +563,8 @@
       name: String(row.name || old.name || row.slug || ''),
       ta: String(row.name_tamil || old.ta || ''),
       blurb: String(row.description || old.blurb || ''),
-      img: catalogImage(row.image_url || old.img || '')
+      img: catalogImage(row.image_url || old.img || ''),
+      image_alignment: categoryAlignment(row.image_alignment || old.image_alignment)
     };
   }
   function catalogProduct(row, i, categoryMap) {
@@ -651,6 +664,7 @@
     };
   }
 
+  window.SITE.categoryImageTransform = categoryImageTransform;
   window.SITE.loadCatalog = function () {
     if (catalogPromise) return catalogPromise;
     catalogPromise = (async function () {
@@ -664,7 +678,7 @@
       }
       var results = await Promise.all([
         client.from('categories')
-          .select('slug,name,name_tamil,description,image_url,order_index')
+          .select('slug,name,name_tamil,description,image_url,image_alignment,order_index')
           .order('order_index', { ascending: true }).range(0, 999),
         client.from('products')
           .select('id,slug,name,category_slug,price,unit,in_stock,image_url,description,mrp,admin_details')

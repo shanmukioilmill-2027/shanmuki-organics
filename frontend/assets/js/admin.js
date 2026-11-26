@@ -1983,7 +1983,7 @@
   /* Category writes are backend-only. Browser localStorage is never proof of a save. */
   function upsertCategoryToSupabase(c, originalSlug) {
     return demoAdminRequest('admin-category-upsert', {
-      category: { slug: c.slug, name: c.name, ta: c.ta, blurb: c.blurb, img: c.img },
+      category: { slug: c.slug, name: c.name, ta: c.ta, blurb: c.blurb, img: c.img, image_alignment: safeCategoryAlignment(c.image_alignment) },
       originalSlug: originalSlug || null
     });
   }
@@ -1997,6 +1997,7 @@
         return {
           id: r.id, slug: r.slug, name: r.name || '', ta: r.name_tamil || '',
           blurb: r.description || '', img: r.image_url || '', icon: r.icon || '',
+          image_alignment: safeCategoryAlignment(r.image_alignment),
           order_index: r.order_index || 0
         };
       });
@@ -2170,9 +2171,31 @@
 
   /* ============================================================ CATEGORIES */
 
+  // Keep category edits as visual metadata; never destructively crop the uploaded file.
+  function safeCategoryAlignment(value) {
+    value = value && typeof value === 'object' ? value : {};
+    function bound(n, min, max, fallback) {
+      n = Number(n);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+    }
+    return { scale: bound(value.scale, 50, 160, 100), x: bound(value.x, -50, 50, 0), y: bound(value.y, -50, 50, 0) };
+  }
+  function categoryImageTransform(value) {
+    var a = safeCategoryAlignment(value);
+    return 'translate(' + a.x + '%, ' + a.y + '%) scale(' + (a.scale / 100) + ')';
+  }
+  function categoryAlignmentFromForm(modal) {
+    return safeCategoryAlignment({
+      scale: modal.querySelector('#catAlignScale').value,
+      x: modal.querySelector('#catAlignX').value,
+      y: modal.querySelector('#catAlignY').value
+    });
+  }
+
   function getCategoryFormHTML(c) {
     c = c || {};
     var hasImg = !!c.img;
+    var categoryAlign = safeCategoryAlignment(c.image_alignment);
     var imgStyle = hasImg ? 'display:none;' : '';
     var previewStyle = hasImg ? 'display:block;' : 'display:none;';
     return '<div class="form-group"><label>Category Name *</label><input class="form-control" id="catName" maxlength="120" placeholder="e.g. Spices" value="' + escHtml(c.name || '') + '"></div>' +
@@ -2180,17 +2203,20 @@
       '<div class="form-group"><label>Description</label><textarea class="form-control" id="catDesc" maxlength="2000" placeholder="Brief description...">' + escHtml(c.blurb || '') + '</textarea></div>' +
       '<div class="form-group"><label>Category Image</label>' +
       '<input type="hidden" id="catImg" value="' + escHtml(c.img || '') + '">' +
+      '<input type="hidden" id="catAlignScale" value="' + categoryAlign.scale + '">' +
+      '<input type="hidden" id="catAlignX" value="' + categoryAlign.x + '">' +
+      '<input type="hidden" id="catAlignY" value="' + categoryAlign.y + '">' +
       '<input type="file" id="catImgFile" accept="image/*" style="display:none">' +
       '<div id="catImgDropzone" style="' + imgStyle + 'border:2px dashed #ccd5cc;border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s">' +
       '<div style="font-size:13px;font-weight:600;color:#3f5045">Click to upload or drag &amp; drop</div>' +
       '<div style="font-size:11px;color:#92a096;margin-top:4px">PNG / JPG / WebP up to 5MB · best 800×600 px</div>' +
       '</div>' +
       '<div id="catImgPreview" style="' + previewStyle + 'position:relative;border-radius:10px;overflow:hidden;border:1px solid #e2e8e0;margin-top:6px">' +
-      '<img id="catImgThumb" src="' + escHtml(c.img || '') + '" style="width:100%;height:180px;object-fit:cover;display:block" alt="Preview">' +
+      '<div style="overflow:hidden;height:180px;background:#fff"><img id="catImgThumb" src="' + escHtml(c.img || '') + '" role="button" tabindex="0" aria-label="Adjust category image size and position" title="Click or press Enter to adjust image" style="width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;transform-origin:center center;transform:' + categoryImageTransform(categoryAlign) + '" alt="Category preview"></div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#f8f9f6">' +
-      '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Image loaded</span>' +
+      '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to adjust its size and position</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
-      '</div></div></div>';
+      '</div><div style="padding:6px 12px;background:#f8f9f6;text-align:center"><button type="button" id="catImgAdjust" style="color:#176b37;border:1px solid #9abb9e;padding:7px 12px;background:white;border-radius:7px;cursor:pointer">↗ Adjust Image Size &amp; Position</button></div></div></div>';
   }
 
   function initCategoryImageUpload(modal) {
@@ -2201,6 +2227,99 @@
     var info = modal.querySelector('#catImgInfo');
     var removeBtn = modal.querySelector('#catImgRemove');
     var hiddenInput = modal.querySelector('#catImg');
+    var adjustBtn = modal.querySelector('#catImgAdjust');
+    function updateCategoryPreview() {
+      thumb.style.transform = categoryImageTransform(categoryAlignmentFromForm(modal));
+    }
+    function resetCategoryAlignment() {
+      modal.querySelector('#catAlignScale').value = '100';
+      modal.querySelector('#catAlignX').value = '0';
+      modal.querySelector('#catAlignY').value = '0';
+      updateCategoryPreview();
+    }
+
+    // The editor uses the same size + x/y sliders and drag gestures as Product Image Alignment.
+    // Apply changes only to the form draft; the outer Save persists to Supabase.
+    function openCategoryAlignmentEditor() {
+      if (!hiddenInput.value || document.querySelector('[data-category-alignment-editor]')) return;
+      var imgUrl = hiddenInput.value;
+      var alignment = categoryAlignmentFromForm(modal);
+      var layer = document.createElement('div');
+      layer.setAttribute('data-category-alignment-editor', '');
+      layer.setAttribute('role', 'dialog');
+      layer.setAttribute('aria-modal', 'true');
+      layer.setAttribute('aria-label', 'Category Image Alignment');
+      layer.style.cssText = 'position:fixed;inset:0;z-index:2147483001;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;';
+      layer.innerHTML =
+        '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Drag the picture inside the preview, or adjust the size and Left / Right, Up / Down sliders. The storefront displays category images inside circles.</p>' +
+          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:14px;overflow:hidden;width:min(100%,460px);margin:0 auto;aspect-ratio:460/420;cursor:grab;touch-action:none;user-select:none"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Category alignment preview" draggable="false" style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;transform-origin:center center"></div>' +
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
+            '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
+            '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-cat-align-x-label></output><input data-cat-align-x type="range" min="-50" max="50" step="1"></label>' +
+            '<label style="display:grid;gap:6px;font-size:13px">Up / Down <output data-cat-align-y-label></output><input data-cat-align-y type="range" min="-50" max="50" step="1"></label>' +
+          '</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button type="button" data-cat-align-reset style="background:#fff;border:1px solid #b8c9b6;padding:9px 16px;border-radius:7px;cursor:pointer">Reset</button><button type="button" data-cat-align-cancel style="background:#fff;border:1px solid #b8c9b6;padding:9px 16px;border-radius:7px;cursor:pointer">Cancel</button><button type="button" data-cat-align-apply style="background:#176b37;color:#fff;border:1px solid #176b37;padding:9px 16px;border-radius:7px;cursor:pointer">Apply Alignment</button></div>' +
+          '<p style="margin:10px 0 0;font-size:12px;color:#647468">After Apply Alignment, click the original Edit Category form’s Save button to publish.</p>' +
+        '</div>';
+      document.body.appendChild(layer);
+      var stage = layer.querySelector('[data-cat-align-stage]');
+      var image = layer.querySelector('[data-cat-align-image]');
+      var s = layer.querySelector('[data-cat-align-scale]');
+      var x = layer.querySelector('[data-cat-align-x]');
+      var y = layer.querySelector('[data-cat-align-y]');
+      function paint() {
+        image.style.transform = categoryImageTransform(alignment);
+        s.value = alignment.scale;
+        x.value = alignment.x;
+        y.value = alignment.y;
+        layer.querySelector('[data-cat-align-scale-label]').textContent = alignment.scale + '%';
+        layer.querySelector('[data-cat-align-x-label]').textContent = alignment.x + '%';
+        layer.querySelector('[data-cat-align-y-label]').textContent = alignment.y + '%';
+      }
+      function close() { document.removeEventListener('keydown', onEscape); layer.remove(); }
+      function onEscape(event) { if (event.key === 'Escape') { event.stopImmediatePropagation(); close(); } }
+      document.addEventListener('keydown', onEscape, true);
+      layer.addEventListener('click', function (event) {
+        if (event.target === layer || event.target.closest('[data-cat-align-cancel]')) { close(); return; }
+        if (event.target.closest('[data-cat-align-reset]')) { alignment = { scale:100, x:0, y:0 }; paint(); return; }
+        if (event.target.closest('[data-cat-align-apply]')) {
+          if (hiddenInput.value !== imgUrl) { close(); return; } // stale image guard
+          modal.querySelector('#catAlignScale').value = alignment.scale;
+          modal.querySelector('#catAlignX').value = alignment.x;
+          modal.querySelector('#catAlignY').value = alignment.y;
+          updateCategoryPreview();
+          info.textContent = 'Image alignment: ' + alignment.scale + '% · X ' + alignment.x + '% · Y ' + alignment.y + '%';
+          close();
+        }
+      });
+      s.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:s.value,x:alignment.x,y:alignment.y}); paint(); });
+      x.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:x.value,y:alignment.y}); paint(); });
+      y.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:alignment.x,y:y.value}); paint(); });
+      var drag = null;
+      stage.addEventListener('pointerdown', function (event) {
+        if (event.button !== 0) return;
+        drag = { id:event.pointerId, startX:event.clientX, startY:event.clientY, x:alignment.x, y:alignment.y };
+        stage.setPointerCapture(event.pointerId); stage.style.cursor = 'grabbing';
+      });
+      stage.addEventListener('pointermove', function (event) {
+        if (!drag || drag.id !== event.pointerId) return;
+        var rect = stage.getBoundingClientRect();
+        alignment = safeCategoryAlignment({scale:alignment.scale,x:drag.x+(event.clientX-drag.startX)*100/rect.width,y:drag.y+(event.clientY-drag.startY)*100/rect.height});
+        paint();
+      });
+      function endDrag() { drag = null; stage.style.cursor = 'grab'; }
+      stage.addEventListener('pointerup', endDrag);
+      stage.addEventListener('pointercancel', endDrag);
+      paint();
+      s.focus();
+    }
+    adjustBtn.addEventListener('click', openCategoryAlignmentEditor);
+    thumb.addEventListener('click', openCategoryAlignmentEditor);
+    thumb.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCategoryAlignmentEditor(); }
+    });
 
     function compressCatImage(file, maxW, maxH, maxKB, callback) {
       var img = new Image();
@@ -2229,7 +2348,8 @@
       compressCatImage(file, 800, 600, IMG_KB.category, function (dataUrl) {
         hiddenInput.value = dataUrl;
         thumb.src = dataUrl;
-        info.textContent = file.name + ' (~' + (dataUrl.length / 1024).toFixed(1) + ' KB compressed)';
+        resetCategoryAlignment();
+        info.textContent = file.name + ' (~' + (dataUrl.length / 1024).toFixed(1) + ' KB compressed) · Click image to adjust';
         dropzone.style.display = 'none';
         preview.style.display = 'block';
       });
@@ -2254,6 +2374,7 @@
     });
     removeBtn.addEventListener('click', function () {
       hiddenInput.value = ''; thumb.src = ''; fileInput.value = '';
+      resetCategoryAlignment();
       preview.style.display = 'none'; dropzone.style.display = '';
     });
   }
@@ -2282,10 +2403,11 @@
     var ta = modal.querySelector('#catTa').value.trim();
     var desc = modal.querySelector('#catDesc').value.trim();
     var img = modal.querySelector('#catImg').value || '';
+    var image_alignment = categoryAlignmentFromForm(modal);
     if (!name) { toast('Category name is required', 'error'); return null; }
     var slug = originalSlug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
     if (!slug) { toast('Use an English category name or a valid slug.', 'error'); return null; }
-    return { name: name, ta: ta, blurb: desc, img: img, slug: slug };
+    return { name: name, ta: ta, blurb: desc, img: img, slug: slug, image_alignment: image_alignment };
   }
 
   // openModal is synchronous: returning false keeps the dialog on screen until
