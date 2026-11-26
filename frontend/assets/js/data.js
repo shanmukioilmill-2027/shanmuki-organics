@@ -600,6 +600,21 @@
         });
       });
     }
+    var variantImagePositions = {};
+    if (detail.variant_image_positions && typeof detail.variant_image_positions === 'object' && !Array.isArray(detail.variant_image_positions)) {
+      sizes.forEach(function (sizeRow) {
+        var label = sizeRow[0];
+        var photos = variantImages[label] || [];
+        var positions = detail.variant_image_positions[label];
+        if (Array.isArray(positions)) variantImagePositions[label] = photos.map(function (_, index) {
+          var point = positions[index] || {}, x = Number(point.x), y = Number(point.y);
+          return {
+            x: Number.isInteger(x) && Math.abs(x) <= 50 ? x : 0,
+            y: Number.isInteger(y) && Math.abs(y) <= 50 ? y : 0
+          };
+        });
+      });
+    }
     var firstPackImages = variantImages[sizes[0][0]] || [];
     var primaryImage = firstPackImages[0] || imageList[0] || catalogImage(old.img || '');
     if (!primaryImage) primaryImage = catalogImage('assets/img/categories/' + cat + '.svg') || 'assets/img/categories/cold-pressed-oils.svg';
@@ -622,6 +637,7 @@
       reviews: Math.max(0, catalogNumber(detail.reviews, old.reviews || 0)),
       img: primaryImage, images: imageList, variant_images: variantImages,
       variant_image_scales: variantImageScales,
+      variant_image_positions: variantImagePositions,
       sku: old.sku || ('SO-' + (SKU_PREFIX[cat] || 'CUS') + '-' + String(i + 1).padStart(3, '0')),
       badge: badge, tags: tags,
       featured: tags.indexOf('featured') >= 0,

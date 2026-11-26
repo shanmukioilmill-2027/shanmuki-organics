@@ -484,6 +484,19 @@
         const n = Array.isArray(group) ? Number(group[index]) : 100;
         return Number.isFinite(n) && n >= 50 && n <= 160 ? n : 100;
       };
+      const positionForPhoto = function (variant, index) {
+        const group = p.variant_image_positions && p.variant_image_positions[variant];
+        const point = Array.isArray(group) ? group[index] : null;
+        const x = point && Number(point.x), y = point && Number(point.y);
+        return {
+          x: Number.isFinite(x) && Math.abs(x) <= 50 ? x : 0,
+          y: Number.isFinite(y) && Math.abs(y) <= 50 ? y : 0
+        };
+      };
+      const transformForPhoto = function (variant, index) {
+        const position = positionForPhoto(variant, index);
+        return 'translate(' + position.x + '%, ' + position.y + '%) scale(' + (scaleForPhoto(variant, index) / 100) + ')';
+      };
       const render = function () {
         const mrp = mrpOf(size, price);
         const offPct = mrp > price ? Math.round((mrp - price) / mrp * 100) : 0;
@@ -493,7 +506,7 @@
         // No product image for this size: show a clear message instead of
         // silently displaying a photo belonging to another size.
         const mainPhotoMarkup = activePhoto
-          ? '<img data-qv-main-image src="' + esc(activePhoto) + '" alt="' + esc(p.name + ' ' + size) + '" style="transform:scale(' + (scaleForPhoto(size, selectedPhotoIndex) / 100) + ');transform-origin:center center">'
+          ? '<img data-qv-main-image src="' + esc(activePhoto) + '" alt="' + esc(p.name + ' ' + size) + '" style="transform:' + transformForPhoto(size, selectedPhotoIndex) + ';transform-origin:center center">'
           : '<div class="so-qv-empty" role="status">' + ic('info') +
             '<span>No product photos uploaded for ' + esc(size) + ' yet.</span></div>';
         const thumbnailMarkup = photos.length > 1
@@ -502,7 +515,7 @@
               return '<button type="button" data-qv-thumb="' + idx + '" class="' +
                 (idx === selectedPhotoIndex ? 'is-on' : '') +
                 '" aria-label="Show ' + esc(size) + ' photo ' + (idx + 1) + '">' +
-                '<img src="' + esc(src) + '" alt=""></button>';
+                '<img src="' + esc(src) + '" alt="" style="transform:' + transformForPhoto(size, idx) + ';transform-origin:center center"></button>';
             }).join('') + '</div>' : '';
         $('[data-modal-in]', Modal.el).innerHTML =
           '<div class="modal__in"><div class="so-qv-gallery">' +
@@ -562,7 +575,7 @@
           const image = inEl.querySelector('[data-qv-main-image]');
           if (image) {
             image.src = images[idx];
-            image.style.transform = 'scale(' + (scaleForPhoto(size, idx) / 100) + ')';
+            image.style.transform = transformForPhoto(size, idx);
           }
           inEl.querySelectorAll('[data-qv-thumb]').forEach(function (button) {
             button.classList.toggle('is-on', button === t);
@@ -625,6 +638,11 @@
     const imageScales = p.variant_image_scales && p.variant_image_scales[p.unit];
     const savedScale = Array.isArray(imageScales) ? Number(imageScales[0]) : 100;
     const scale = Number.isFinite(savedScale) && savedScale >= 50 && savedScale <= 160 ? savedScale : 100;
+    const imagePositions = p.variant_image_positions && p.variant_image_positions[p.unit];
+    const imagePosition = Array.isArray(imagePositions) ? imagePositions[0] : null;
+    const x = imagePosition && Number(imagePosition.x), y = imagePosition && Number(imagePosition.y);
+    const shiftX = Number.isFinite(x) && Math.abs(x) <= 50 ? x : 0;
+    const shiftY = Number.isFinite(y) && Math.abs(y) <= 50 ? y : 0;
     const baseImageWidth = bottleLike ? 24.94 : 40;
     // Keep the original card appearance at 100%, adjusting only its image width.
     const imageWidth = Math.max(12, Math.min(75, baseImageWidth * scale / 100)).toFixed(2) + '%';
@@ -637,7 +655,7 @@
     return '<article class="so-exact-card" data-slug="' + slug + '" style="--so-image-width:' + imageWidth + '" aria-label="' + esc(name) + '">' +
       frame +
       '<a class="so-exact-card__photo-link' + (photo ? '' : ' is-broken') + '" href="' + url + '" aria-label="View ' + esc(name) + '">' +
-      (photo ? '<img data-so-card-image src="' + esc(photo) + '" alt="' + esc(name) + '" loading="lazy">' : '') +
+      (photo ? '<img data-so-card-image src="' + esc(photo) + '" alt="' + esc(name) + '" loading="lazy" style="transform:translate(' + shiftX + '%, ' + shiftY + '%);transform-origin:center center">' : '') +
       '<span class="so-exact-card__fallback">' + fallback + '<span>Product photo coming soon</span></span></a>' +
       (badge ? '<span class="so-exact-card__discount' + (!p.stock ? ' so-exact-card__discount--out' : '') + '">' + esc(badge) + '</span>' : '') +
       '<button type="button" class="so-exact-card__wish" data-wish="' + slug + '" aria-label="Add ' + esc(name) + ' to wishlist">' + heart + '</button>' +

@@ -499,6 +499,19 @@
       const n = Array.isArray(group) ? Number(group[index]) : 100;
       return Number.isFinite(n) && n >= 50 && n <= 160 ? n : 100;
     };
+    const positionForPhoto = function (variant, index) {
+      const group = p.variant_image_positions && p.variant_image_positions[variant];
+      const point = Array.isArray(group) ? group[index] : null;
+      const x = point && Number(point.x), y = point && Number(point.y);
+      return {
+        x: Number.isFinite(x) && Math.abs(x) <= 50 ? x : 0,
+        y: Number.isFinite(y) && Math.abs(y) <= 50 ? y : 0
+      };
+    };
+    const transformForPhoto = function (variant, index) {
+      const position = positionForPhoto(variant, index);
+      return 'translate(' + position.x + '%, ' + position.y + '%) scale(' + (scaleForPhoto(variant, index) / 100) + ')';
+    };
     const draw = function () {
       const gallerySrcs = galleryForSize(size);
       const hasMappedImages = p.variant_images && Object.keys(p.variant_images).some(function (key) {
@@ -510,10 +523,10 @@
       host.innerHTML =
         '<div class="pdp">' +
         /* gallery — only the product's uploaded images become thumbnails */
-        '<div><div class="gallery__main"><img src="' + esc(mainImage) + '" alt="' + esc(p.name) + '" style="transform:scale(' + (scaleForPhoto(size, 0) / 100) + ');transform-origin:center center"></div>' +
+        '<div><div class="gallery__main"><img src="' + esc(mainImage) + '" alt="' + esc(p.name) + '" style="transform:' + transformForPhoto(size, 0) + ';transform-origin:center center"></div>' +
         (gallerySrcs.length ? '<div class="gallery__thumbs">' +
         gallerySrcs.map(function (src, i) {
-          return '<button type="button" class="' + (i === 0 ? 'is-on' : '') + '" data-thumb="' + esc(src) + '" data-thumb-index="' + i + '" aria-label="Photo ' + (i + 1) + ' for ' + esc(size) + '"><img src="' + esc(src) + '" alt="' + esc(size + ' image ' + (i + 1)) + '"></button>';
+          return '<button type="button" class="' + (i === 0 ? 'is-on' : '') + '" data-thumb="' + esc(src) + '" data-thumb-index="' + i + '" aria-label="Photo ' + (i + 1) + ' for ' + esc(size) + '"><img src="' + esc(src) + '" alt="' + esc(size + ' image ' + (i + 1)) + '" style="transform:' + transformForPhoto(size, i) + ';transform-origin:center center"></button>';
         }).join('') + '</div>' : '') + '</div>' +
 
         /* main column */
@@ -673,7 +686,7 @@
         var imageEl = $('.gallery__main img');
         if (imageEl) {
           imageEl.src = th.getAttribute('data-thumb');
-          imageEl.style.transform = 'scale(' + (scaleForPhoto(size, Number(th.getAttribute('data-thumb-index'))) / 100) + ')';
+          imageEl.style.transform = transformForPhoto(size, Number(th.getAttribute('data-thumb-index')));
         }
         $$('.gallery__thumbs button').forEach(function (b) { b.classList.toggle('is-on', b === th); });
         return;

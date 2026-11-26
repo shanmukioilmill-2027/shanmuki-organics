@@ -285,11 +285,31 @@ Deno.serve(async req => {
           return reply({ error: 'Image size must be 50–160% in 5% steps' }, 400, cors);
         variant_image_scales[label] = scales;
       }
+      // Per-size per-photo alignment, not an image upload/transformation.
+      // Backwards-compatible defaults for records saved before this feature.
+      const positionsInput = p.variant_image_positions === undefined ? {} : p.variant_image_positions;
+      if (!positionsInput || typeof positionsInput !== 'object' || Array.isArray(positionsInput))
+        return reply({ error: 'Invalid image alignment settings' }, 400, cors);
+      const variant_image_positions: Record<string, { x: number; y: number }[]> = {};
+      for (const [label, rawPositions] of Object.entries(positionsInput)) {
+        const photos = variant_images[label] || [];
+        if (!allowedSizes.has(label) || !Array.isArray(rawPositions) || rawPositions.length !== photos.length)
+          return reply({ error: 'Image positions must match uploaded photos for each variant' }, 400, cors);
+        const positions: { x: number; y: number }[] = [];
+        for (const position of rawPositions) {
+          if (!position || typeof position !== 'object' || Array.isArray(position) ||
+              !Number.isInteger((position as any).x) || !Number.isInteger((position as any).y) ||
+              Math.abs((position as any).x) > 50 || Math.abs((position as any).y) > 50)
+            return reply({ error: 'Image alignment must be between -50% and 50%' }, 400, cors);
+          positions.push({ x: (position as any).x, y: (position as any).y });
+        }
+        variant_image_positions[label] = positions;
+      }
       const rating = Number(p.rating);
       const details = {
         ta: safe(p.ta, 150), badge: safe(p.badge, 80),
         desc_ta: safe(p.desc_ta, 10000), highlights_ta: hlTa.map(item => item.trim()).filter(Boolean),
-        images: p.images, img, sizes, variant_images, variant_image_scales,
+        images: p.images, img, sizes, variant_images, variant_image_scales, variant_image_positions,
         highlights: hl, rating: Number.isFinite(rating) ? Math.max(1, Math.min(5, rating)) : 4.5,
         reviews: Math.max(0, Math.min(1000000, Number(p.reviews) || 0)),
         custom: p.custom === true

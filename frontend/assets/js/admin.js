@@ -525,6 +525,8 @@
   function blockProductModalBackdropEvent(event) {
     var activeOverlay = document.querySelector('.modal-overlay.is-open');
     if (!activeOverlay || !activeOverlay.querySelector('#pName')) return;
+    // Allow interaction with the separate, trusted photo alignment editor.
+    if (event.target.closest && event.target.closest('[data-variant-alignment-editor]')) return;
     var dialog = activeOverlay.querySelector('.modal');
     if (dialog && !dialog.contains(event.target)) {
       if (event.cancelable) event.preventDefault();
@@ -536,6 +538,8 @@
   });
   window.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
+    // The alignment editor has its own Escape handler; do not swallow it.
+    if (document.querySelector('[data-variant-alignment-editor]')) return;
     var activeOverlay = document.querySelector('.modal-overlay.is-open');
     if (!activeOverlay || !activeOverlay.querySelector('#pName')) return;
     if (event.cancelable) event.preventDefault();
@@ -1453,6 +1457,19 @@
       var n = Number(value);
       return Number.isFinite(n) ? Math.min(160, Math.max(50, Math.round(n / 5) * 5)) : 100;
     }
+    var savedPositions = product && product.variant_image_positions && typeof product.variant_image_positions === 'object'
+      ? product.variant_image_positions : {};
+    function safePhotoPosition(value) {
+      var x = value && Number(value.x), y = value && Number(value.y);
+      return {
+        x: Number.isFinite(x) ? Math.max(-50, Math.min(50, Math.round(x))) : 0,
+        y: Number.isFinite(y) ? Math.max(-50, Math.min(50, Math.round(y))) : 0
+      };
+    }
+    function imageTransform(scale, pos) {
+      pos = safePhotoPosition(pos);
+      return 'translate(' + pos.x + '%, ' + pos.y + '%) scale(' + (safeVariantScale(scale) / 100) + ')';
+    }
     modal._variantPendingUploads = 0;
     modal._variantUploadFailed = false;
 
@@ -1461,12 +1478,15 @@
       // Preserve URL/scale index pairing, even when a stored URL is invalid.
       var urls = Array.isArray(saved[label]) ? saved[label] : [];
       var scales = Array.isArray(savedScales[label]) ? savedScales[label] : [];
+      var positions = Array.isArray(savedPositions[label]) ? savedPositions[label] : [];
       block._variantPhotos = [];
       block._variantScales = [];
+      block._variantPositions = [];
       urls.forEach(function (url, index) {
         if (typeof url === 'string' && url.indexOf('https://') === 0) {
           block._variantPhotos.push(url);
           block._variantScales.push(safeVariantScale(scales[index] == null ? 100 : scales[index]));
+          block._variantPositions.push(safePhotoPosition(positions[index]));
         }
       });
       drawBlock(block);
@@ -1477,12 +1497,14 @@
       block.querySelector('.variant-gallery-caption').textContent = label + ' · ' + pics.length + ' image' + (pics.length === 1 ? '' : 's');
       block.querySelector('.variant-gallery-items').innerHTML = pics.map(function (url, index) {
         var scale = safeVariantScale((block._variantScales || [])[index] == null ? 100 : block._variantScales[index]);
+        var position = safePhotoPosition((block._variantPositions || [])[index]);
         return '<div style="background:#fff;border:1px solid #dce7d7;border-radius:7px;padding:7px;min-width:0" data-variant-index="' + index + '">' +
           '<div style="height:104px;background:#f2f9ee;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden">' +
-          '<img class="variant-scale-preview" src="' + escHtml(url) + '" loading="lazy" alt="' + escHtml(label + ' image ' + (index + 1)) + '" style="max-width:100%;width:100%;height:94px;object-fit:contain;display:block;transform:scale(' + scale / 100 + ');transform-origin:center center">' +
+          '<img class="variant-scale-preview" src="' + escHtml(url) + '" loading="lazy" alt="' + escHtml(label + ' image ' + (index + 1)) + '" title="Double-click to adjust size and position" style="max-width:100%;width:100%;height:94px;object-fit:contain;display:block;cursor:zoom-in;transform:' + imageTransform(scale, position) + ';transform-origin:center center">' +
           '</div>' +
           '<label style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:7px;font-size:11px;color:#176b37;font-weight:600">Image Size <span class="variant-scale-value">' + scale + '%</span></label>' +
           '<input type="range" class="variant-image-scale" min="50" max="160" step="5" value="' + scale + '" aria-label="Image size percentage for ' + escHtml(label) + ' photo ' + (index + 1) + '" style="width:100%;accent-color:#176b37">' +
+          '<button type="button" class="variant-open-align" style="width:100%;margin-top:5px;border:1px solid #a0bdaa;background:#f5fbf5;padding:5px;border-radius:5px;color:#176b37;cursor:pointer;font-size:11px" title="Open large product alignment preview">↗ Adjust position / Double-click image</button>' +
           '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:3px;gap:2px">' +
           (index === 0 ? '<strong style="font-size:10px;color:#176b37">Main</strong>' : '<button type="button" class="variant-make-main" style="font-size:10px;color:#176b37;border:0;background:none;cursor:pointer;padding:2px" title="Set as main photo">Make main</button>') +
           '<button type="button" class="variant-reset-scale" style="font-size:10px;color:#176b37;border:0;background:none;cursor:pointer;padding:2px" title="Reset image size">Reset</button>' +
@@ -1517,20 +1539,27 @@
       if (!photo) return;
       var index = Number(photo.getAttribute('data-variant-index'));
       if (!Number.isInteger(index) || index < 0 || index >= block._variantPhotos.length) return;
+      if (event.target.closest('.variant-open-align')) {
+        openVariantAlignmentEditor(block, index); return;
+      }
       if (event.target.closest('.variant-remove-image')) {
         block._variantPhotos.splice(index, 1);
         block._variantScales.splice(index, 1);
+        block._variantPositions.splice(index, 1);
         drawBlock(block); return;
       }
       if (event.target.closest('.variant-reset-scale')) {
         block._variantScales[index] = 100;
+        block._variantPositions[index] = { x: 0, y: 0 };
         drawBlock(block); return;
       }
       if (event.target.closest('.variant-make-main')) {
         var selected = block._variantPhotos.splice(index, 1)[0];
         var selectedScale = block._variantScales.splice(index, 1)[0];
+        var selectedPosition = block._variantPositions.splice(index, 1)[0];
         block._variantPhotos.unshift(selected);
         block._variantScales.unshift(selectedScale);
+        block._variantPositions.unshift(selectedPosition);
         drawBlock(block);
       }
     });
@@ -1549,9 +1578,107 @@
         block._variantScales[index] = scale;
         var preview = photo.querySelector('.variant-scale-preview');
         var value = photo.querySelector('.variant-scale-value');
-        if (preview) preview.style.transform = 'scale(' + (scale / 100) + ')';
+        if (preview) preview.style.transform = imageTransform(scale, block._variantPositions[index]);
         if (value) value.textContent = scale + '%';
       }
+    });
+
+    // Double-click a thumbnail to adjust its position on a full-size product
+    // canvas. This changes the draft only; Save Product persists metadata.
+    function openVariantAlignmentEditor(block, index) {
+      if (!block || !block._variantPhotos || !block._variantPhotos[index]) return;
+      if (document.querySelector('[data-variant-alignment-editor]')) return;
+      var url = block._variantPhotos[index];
+      var scale = safeVariantScale(block._variantScales[index]);
+      var position = safePhotoPosition(block._variantPositions[index]);
+      var sizeLabel = block.querySelector('.pSizeUnit').value.trim() || 'Pack';
+      var layer = document.createElement('div');
+      layer.setAttribute('data-variant-alignment-editor', '');
+      layer.setAttribute('role', 'dialog');
+      layer.setAttribute('aria-modal', 'true');
+      layer.setAttribute('aria-label', 'Adjust product image alignment');
+      layer.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;';
+      layer.innerHTML =
+        '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">' + escHtml(sizeLabel) + ' — Product Image Alignment</h3><button type="button" data-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
+        '<p style="margin:0 0 12px;color:#647468;font-size:13px">Drag the bottle inside the white product gallery to position it. Adjust size and fine-tune horizontal / vertical alignment.</p>' +
+        '<div data-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:14px;overflow:hidden;width:min(100%,460px);margin:0 auto;aspect-ratio:460 / 420;cursor:grab;touch-action:none;user-select:none">' +
+          '<img data-align-image src="' + escHtml(url) + '" alt="' + escHtml(sizeLabel) + ' product alignment preview" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;transform-origin:center center;background:#fff">' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
+        '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-align-size-label></output><input data-align-scale type="range" min="50" max="160" step="5"></label>' +
+        '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-align-x-label></output><input data-align-x type="range" min="-50" max="50" step="1"></label>' +
+        '<label style="display:grid;gap:6px;font-size:13px">Up / Down <output data-align-y-label></output><input data-align-y type="range" min="-50" max="50" step="1"></label>' +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button type="button" data-align-reset style="background:#fff;border:1px solid #b8c9b6;padding:9px 16px;border-radius:7px;cursor:pointer">Reset</button><button type="button" data-align-cancel style="background:#fff;border:1px solid #b8c9b6;padding:9px 16px;border-radius:7px;cursor:pointer">Cancel</button><button type="button" data-align-apply style="background:#176b37;color:#fff;border:1px solid #176b37;padding:9px 16px;border-radius:7px;cursor:pointer">Apply Alignment</button></div>' +
+        '<p style="margin:10px 0 0;font-size:12px;color:#647468">To publish this alignment, click the original Edit Product form’s Save button after Apply Alignment.</p>' +
+        '</div>';
+      document.body.appendChild(layer);
+      var stage = layer.querySelector('[data-align-stage]');
+      var preview = layer.querySelector('[data-align-image]');
+      var scaleInput = layer.querySelector('[data-align-scale]');
+      var xInput = layer.querySelector('[data-align-x]');
+      var yInput = layer.querySelector('[data-align-y]');
+      function paint() {
+        preview.style.transform = imageTransform(scale, position);
+        scaleInput.value = String(scale);
+        xInput.value = String(position.x);
+        yInput.value = String(position.y);
+        layer.querySelector('[data-align-size-label]').textContent = scale + '%';
+        layer.querySelector('[data-align-x-label]').textContent = position.x + '%';
+        layer.querySelector('[data-align-y-label]').textContent = position.y + '%';
+      }
+      function close() {
+        document.removeEventListener('keydown', onKey);
+        if (layer.parentNode) layer.remove();
+      }
+      function onKey(event) { if (event.key === 'Escape') close(); }
+      document.addEventListener('keydown', onKey);
+      layer.addEventListener('click', function (event) {
+        if (event.target === layer || event.target.closest('[data-align-cancel]')) { close(); return; }
+        if (event.target.closest('[data-align-reset]')) {
+          scale = 100; position = { x: 0, y: 0 }; paint(); return;
+        }
+        if (event.target.closest('[data-align-apply]')) {
+          // Prevent applying a stale image if product rows were changed during editing.
+          if (block._variantPhotos[index] !== url) { close(); return; }
+          block._variantScales[index] = scale;
+          block._variantPositions[index] = safePhotoPosition(position);
+          drawBlock(block);
+          close();
+        }
+      });
+      scaleInput.addEventListener('input', function () { scale = safeVariantScale(scaleInput.value); paint(); });
+      xInput.addEventListener('input', function () { position.x = safePhotoPosition({ x: xInput.value, y: position.y }).x; paint(); });
+      yInput.addEventListener('input', function () { position.y = safePhotoPosition({ x: position.x, y: yInput.value }).y; paint(); });
+      var drag = null;
+      stage.addEventListener('pointerdown', function (event) {
+        if (event.button !== 0) return;
+        drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: position.x, y: position.y };
+        stage.setPointerCapture(event.pointerId);
+        stage.style.cursor = 'grabbing';
+      });
+      stage.addEventListener('pointermove', function (event) {
+        if (!drag || drag.id !== event.pointerId) return;
+        var bounds = stage.getBoundingClientRect();
+        position = safePhotoPosition({
+          x: drag.x + (event.clientX - drag.startX) * 100 / bounds.width,
+          y: drag.y + (event.clientY - drag.startY) * 100 / bounds.height
+        });
+        paint();
+      });
+      function endDrag() { drag = null; stage.style.cursor = 'grab'; }
+      stage.addEventListener('pointerup', endDrag);
+      stage.addEventListener('pointercancel', endDrag);
+      paint();
+      layer.querySelector('[data-align-scale]').focus();
+    }
+    container.addEventListener('dblclick', function (event) {
+      var photo = event.target.closest('[data-variant-index]');
+      var block = event.target.closest('.size-block');
+      if (!photo || !block || !event.target.closest('.variant-scale-preview')) return;
+      var index = Number(photo.getAttribute('data-variant-index'));
+      if (Number.isInteger(index) && index >= 0) openVariantAlignmentEditor(block, index);
     });
 
     // V22: A size-specific photo can be up to 5 MiB. Keep original PNG bytes
@@ -1614,6 +1741,7 @@
             }
             block._variantPhotos.push(result.url);
             block._variantScales.push(100);
+            block._variantPositions.push({ x: 0, y: 0 });
             savedCount++;
             drawBlock(block);
           }
@@ -1654,6 +1782,7 @@
     if (new Set(keys).size !== keys.length) { toast('Every size label must be unique', 'error'); return null; }
     var variantImages = {};
     var variantImageScales = {};
+    var variantImagePositions = {};
     sizeRows.forEach(function (row) {
       var block = row.closest('.size-block');
       if (!block) return;
@@ -1663,6 +1792,14 @@
         variantImages[key] = urls.slice();
         variantImageScales[key] = urls.map(function (_, index) {
           return Math.max(50, Math.min(160, Number((block._variantScales || [])[index]) || 100));
+        });
+        variantImagePositions[key] = urls.map(function (_, index) {
+          var entry = (block._variantPositions || [])[index] || { x: 0, y: 0 };
+          var x = Number(entry.x), y = Number(entry.y);
+          return {
+            x: Number.isFinite(x) ? Math.max(-50, Math.min(50, Math.round(x))) : 0,
+            y: Number.isFinite(y) ? Math.max(-50, Math.min(50, Math.round(y))) : 0
+          };
         });
       }
     });
@@ -1703,6 +1840,7 @@
       images: imgs,
       variant_images: variantImages,
       variant_image_scales: variantImageScales,
+      variant_image_positions: variantImagePositions,
       desc: modal.querySelector('#pDesc').value.trim() || '',
       desc_ta: modal.querySelector('#pDescTa').value.trim() || '',
       stock: modal.querySelector('#pStock').checked,
@@ -1749,6 +1887,17 @@
       })) {
         throw new Error('Image size settings were NOT saved. Deploy the updated demo-payment-kit Edge Function before saving size adjustments.');
       }
+      var expectedPositions = p.variant_image_positions || {};
+      var actualPositions = details && details.variant_image_positions;
+      if (Object.keys(expectedPositions).some(function (key) {
+        var exp = expectedPositions[key];
+        var got = actualPositions && actualPositions[key];
+        return !Array.isArray(got) || got.length !== exp.length || exp.some(function (pos, i) {
+          return !got[i] || Number(got[i].x) !== pos.x || Number(got[i].y) !== pos.y;
+        });
+      })) {
+        throw new Error('Image position settings were NOT saved. Deploy the updated demo-payment-kit Edge Function before saving alignments.');
+      }
       return response;
     });
   }
@@ -1776,6 +1925,7 @@
           img: img, images: images, sizes: sizes,
           variant_images: meta.variant_images && typeof meta.variant_images === 'object' ? meta.variant_images : {},
           variant_image_scales: meta.variant_image_scales && typeof meta.variant_image_scales === 'object' ? meta.variant_image_scales : {},
+          variant_image_positions: meta.variant_image_positions && typeof meta.variant_image_positions === 'object' ? meta.variant_image_positions : {},
           highlights: Array.isArray(meta.highlights) ? meta.highlights : [],
           highlights_ta: Array.isArray(meta.highlights_ta) ? meta.highlights_ta : [],
           custom: !!meta.custom
