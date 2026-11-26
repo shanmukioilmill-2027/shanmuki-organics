@@ -479,6 +479,11 @@
 
       Modal.mount();
       let size = p.sizes[0][0], price = p.sizes[0][1], selectedPhotoIndex = 0;
+      const scaleForPhoto = function (variant, index) {
+        const group = p.variant_image_scales && p.variant_image_scales[variant];
+        const n = Array.isArray(group) ? Number(group[index]) : 100;
+        return Number.isFinite(n) && n >= 50 && n <= 160 ? n : 100;
+      };
       const render = function () {
         const mrp = mrpOf(size, price);
         const offPct = mrp > price ? Math.round((mrp - price) / mrp * 100) : 0;
@@ -488,7 +493,7 @@
         // No product image for this size: show a clear message instead of
         // silently displaying a photo belonging to another size.
         const mainPhotoMarkup = activePhoto
-          ? '<img data-qv-main-image src="' + esc(activePhoto) + '" alt="' + esc(p.name + ' ' + size) + '">'
+          ? '<img data-qv-main-image src="' + esc(activePhoto) + '" alt="' + esc(p.name + ' ' + size) + '" style="transform:scale(' + (scaleForPhoto(size, selectedPhotoIndex) / 100) + ');transform-origin:center center">'
           : '<div class="so-qv-empty" role="status">' + ic('info') +
             '<span>No product photos uploaded for ' + esc(size) + ' yet.</span></div>';
         const thumbnailMarkup = photos.length > 1
@@ -555,7 +560,10 @@
           if (!Number.isInteger(idx) || idx < 0 || idx >= images.length) return;
           selectedPhotoIndex = idx;
           const image = inEl.querySelector('[data-qv-main-image]');
-          if (image) image.src = images[idx];
+          if (image) {
+            image.src = images[idx];
+            image.style.transform = 'scale(' + (scaleForPhoto(size, idx) / 100) + ')';
+          }
           inEl.querySelectorAll('[data-qv-thumb]').forEach(function (button) {
             button.classList.toggle('is-on', button === t);
           });
@@ -614,7 +622,12 @@
     // Bottles look like the reference; broader products (grains, powder packs)
     // get a wider image box without changing frame proportions.
     const bottleLike = /oil|ghee|hair|honey|juice|syrup/i.test(name);
-    const imageWidth = bottleLike ? '24.94%' : '40%';
+    const imageScales = p.variant_image_scales && p.variant_image_scales[p.unit];
+    const savedScale = Array.isArray(imageScales) ? Number(imageScales[0]) : 100;
+    const scale = Number.isFinite(savedScale) && savedScale >= 50 && savedScale <= 160 ? savedScale : 100;
+    const baseImageWidth = bottleLike ? 24.94 : 40;
+    // Keep the original card appearance at 100%, adjusting only its image width.
+    const imageWidth = Math.max(12, Math.min(75, baseImageWidth * scale / 100)).toFixed(2) + '%';
     const fallback = '<svg viewBox="0 0 80 88" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M29 12h22v10l7 9v41a7 7 0 0 1-7 7H29a7 7 0 0 1-7-7V31l7-9z"/><path d="M29 13V8h22v5M22 39h36M22 65h36"/><path d="M40 48c-7 1-10 5-9 12 9 0 13-5 9-12zm0 0c6 1 11 6 10 12-7 0-12-4-10-12z"/></svg>';
     const frame = '<svg class="so-exact-card__frame" viewBox="0 0 1163 1080" preserveAspectRatio="none" aria-hidden="true"><path d="M 126 35 L 1026 35 C 1082 35 1127 80 1127 136 L 1127 958 L 433 958 L 357 1034 L 36 1034 L 36 136 C 36 80 81 35 126 35 Z"/></svg>';
     const heart = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 42.5 6.9 26.8C-1.6 18.9 4 6.8 14.2 6.8c4.4 0 7.6 2.3 9.8 5.8 2.2-3.5 5.4-5.8 9.8-5.8 10.2 0 15.8 12.1 7.3 20L24 42.5Z"/></svg>';

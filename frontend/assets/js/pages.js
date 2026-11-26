@@ -494,6 +494,11 @@
       return unique;
     };
 
+    const scaleForPhoto = function (variant, index) {
+      const group = p.variant_image_scales && p.variant_image_scales[variant];
+      const n = Array.isArray(group) ? Number(group[index]) : 100;
+      return Number.isFinite(n) && n >= 50 && n <= 160 ? n : 100;
+    };
     const draw = function () {
       const gallerySrcs = galleryForSize(size);
       const hasMappedImages = p.variant_images && Object.keys(p.variant_images).some(function (key) {
@@ -505,10 +510,10 @@
       host.innerHTML =
         '<div class="pdp">' +
         /* gallery — only the product's uploaded images become thumbnails */
-        '<div><div class="gallery__main"><img src="' + esc(mainImage) + '" alt="' + esc(p.name) + '"></div>' +
+        '<div><div class="gallery__main"><img src="' + esc(mainImage) + '" alt="' + esc(p.name) + '" style="transform:scale(' + (scaleForPhoto(size, 0) / 100) + ');transform-origin:center center"></div>' +
         (gallerySrcs.length ? '<div class="gallery__thumbs">' +
         gallerySrcs.map(function (src, i) {
-          return '<button type="button" class="' + (i === 0 ? 'is-on' : '') + '" data-thumb="' + esc(src) + '" aria-label="Photo ' + (i + 1) + ' for ' + esc(size) + '"><img src="' + esc(src) + '" alt="' + esc(size + ' image ' + (i + 1)) + '"></button>';
+          return '<button type="button" class="' + (i === 0 ? 'is-on' : '') + '" data-thumb="' + esc(src) + '" data-thumb-index="' + i + '" aria-label="Photo ' + (i + 1) + ' for ' + esc(size) + '"><img src="' + esc(src) + '" alt="' + esc(size + ' image ' + (i + 1)) + '"></button>';
         }).join('') + '</div>' : '') + '</div>' +
 
         /* main column */
@@ -665,7 +670,11 @@
       if (s) { size = s.getAttribute('data-size'); draw(); return; }
       const th = e.target.closest('[data-thumb]');
       if (th) {
-        $('.gallery__main img').src = th.getAttribute('data-thumb');
+        var imageEl = $('.gallery__main img');
+        if (imageEl) {
+          imageEl.src = th.getAttribute('data-thumb');
+          imageEl.style.transform = 'scale(' + (scaleForPhoto(size, Number(th.getAttribute('data-thumb-index'))) / 100) + ')';
+        }
         $$('.gallery__thumbs button').forEach(function (b) { b.classList.toggle('is-on', b === th); });
         return;
       }

@@ -458,13 +458,16 @@
     var titles = {
       dashboard: 'Dashboard', products: 'Products', categories: 'Categories',
       orders: 'Orders', payments: 'Payment Gateway', customers: 'Customers', reviews: 'Reviews',
-      coupons: 'Coupons', banners: 'Banners', reports: 'Reports', settings: 'Settings'
+      coupons: 'Coupons', banners: 'Banners', content: 'Homepage Editor', reports: 'Reports', settings: 'Settings'
     };
     pageTitle.textContent = titles[page] || 'Dashboard';
     var renderers = {
       dashboard: renderDashboard, products: renderProducts, categories: renderCategories,
       orders: renderOrders, payments: renderPayments, customers: renderCustomers, reviews: renderReviews,
-      coupons: renderCoupons, banners: renderBanners, reports: renderReports, settings: renderSettings
+      coupons: renderCoupons, banners: renderBanners, content: function () {
+        if (window.AdminContent) window.AdminContent.render();
+        else pageContent.innerHTML = '<p>Homepage editor resources are missing; redeploy plugins/cms/ and reload.</p>';
+      }, reports: renderReports, settings: renderSettings
     };
     (renderers[page] || renderDashboard)();
     window.scrollTo(0, 0);
@@ -1024,7 +1027,7 @@
       '<span class="variant-gallery-caption" style="font-size:12px;font-weight:700;color:#166734">Images for this size · 0 images</span>' +
       '<button type="button" class="variant-gallery-add" style="font-size:12px;border:1px solid #176b37;background:#fff;color:#176b37;border-radius:7px;padding:7px 10px;cursor:pointer">+ Add Images</button>' +
       '</div><input type="file" class="variant-gallery-file" accept="image/png,image/jpeg,image/webp" multiple hidden>' +
-      '<div class="variant-gallery-items" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;margin-top:9px"></div>' +
+      '<div class="variant-gallery-items" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(142px,1fr));gap:9px;margin-top:9px"></div>' +
       '<p class="variant-gallery-status" role="status" style="margin:6px 0 0;color:#627565;font-size:11px">PNG, JPG or WebP • up to 5 MB per image. First photo is the main photo. Requires the V22 admin image upload backend.</p>' +
       '</div></div>';
   }
@@ -1442,14 +1445,30 @@
     var addBtn = modal.querySelector('#pAddSize');
     var saved = product && product.variant_images && typeof product.variant_images === 'object'
       ? product.variant_images : {};
+    // Per-image visual scale, aligned by index with variant_images[size].
+    // Existing products have no scale data and render at 100%.
+    var savedScales = product && product.variant_image_scales && typeof product.variant_image_scales === 'object'
+      ? product.variant_image_scales : {};
+    function safeVariantScale(value) {
+      var n = Number(value);
+      return Number.isFinite(n) ? Math.min(160, Math.max(50, Math.round(n / 5) * 5)) : 100;
+    }
     modal._variantPendingUploads = 0;
     modal._variantUploadFailed = false;
 
     function initBlock(block) {
       var label = block.querySelector('.pSizeUnit').value.trim();
-      block._variantPhotos = Array.isArray(saved[label]) ? saved[label].filter(function (x) {
-        return typeof x === 'string' && x.indexOf('https://') === 0;
-      }).slice() : [];
+      // Preserve URL/scale index pairing, even when a stored URL is invalid.
+      var urls = Array.isArray(saved[label]) ? saved[label] : [];
+      var scales = Array.isArray(savedScales[label]) ? savedScales[label] : [];
+      block._variantPhotos = [];
+      block._variantScales = [];
+      urls.forEach(function (url, index) {
+        if (typeof url === 'string' && url.indexOf('https://') === 0) {
+          block._variantPhotos.push(url);
+          block._variantScales.push(safeVariantScale(scales[index] == null ? 100 : scales[index]));
+        }
+      });
       drawBlock(block);
     }
     function drawBlock(block) {
@@ -1457,10 +1476,16 @@
       var label = block.querySelector('.pSizeUnit').value.trim() || 'This size';
       block.querySelector('.variant-gallery-caption').textContent = label + ' · ' + pics.length + ' image' + (pics.length === 1 ? '' : 's');
       block.querySelector('.variant-gallery-items').innerHTML = pics.map(function (url, index) {
-        return '<div style="background:#fff;border:1px solid #dce7d7;border-radius:7px;overflow:hidden;padding:4px" data-variant-index="' + index + '">' +
-          '<img src="' + escHtml(url) + '" loading="lazy" alt="' + escHtml(label + ' image ' + (index + 1)) + '" style="width:100%;height:84px;object-fit:contain;display:block">' +
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;gap:2px">' +
-          (index === 0 ? '<strong style="font-size:9px;color:#176b37">Main</strong>' : '<button type="button" class="variant-make-main" style="font-size:10px;color:#176b37;border:0;background:none;cursor:pointer;padding:2px" title="Set as main photo">Make main</button>') +
+        var scale = safeVariantScale((block._variantScales || [])[index] == null ? 100 : block._variantScales[index]);
+        return '<div style="background:#fff;border:1px solid #dce7d7;border-radius:7px;padding:7px;min-width:0" data-variant-index="' + index + '">' +
+          '<div style="height:104px;background:#f2f9ee;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden">' +
+          '<img class="variant-scale-preview" src="' + escHtml(url) + '" loading="lazy" alt="' + escHtml(label + ' image ' + (index + 1)) + '" style="max-width:100%;width:100%;height:94px;object-fit:contain;display:block;transform:scale(' + scale / 100 + ');transform-origin:center center">' +
+          '</div>' +
+          '<label style="display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:7px;font-size:11px;color:#176b37;font-weight:600">Image Size <span class="variant-scale-value">' + scale + '%</span></label>' +
+          '<input type="range" class="variant-image-scale" min="50" max="160" step="5" value="' + scale + '" aria-label="Image size percentage for ' + escHtml(label) + ' photo ' + (index + 1) + '" style="width:100%;accent-color:#176b37">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:3px;gap:2px">' +
+          (index === 0 ? '<strong style="font-size:10px;color:#176b37">Main</strong>' : '<button type="button" class="variant-make-main" style="font-size:10px;color:#176b37;border:0;background:none;cursor:pointer;padding:2px" title="Set as main photo">Make main</button>') +
+          '<button type="button" class="variant-reset-scale" style="font-size:10px;color:#176b37;border:0;background:none;cursor:pointer;padding:2px" title="Reset image size">Reset</button>' +
           '<button type="button" class="variant-remove-image" style="color:#b91c1c;border:0;background:none;cursor:pointer;padding:2px 4px" title="Remove photo">✕</button>' +
           '</div></div>';
       }).join('');
@@ -1494,11 +1519,18 @@
       if (!Number.isInteger(index) || index < 0 || index >= block._variantPhotos.length) return;
       if (event.target.closest('.variant-remove-image')) {
         block._variantPhotos.splice(index, 1);
+        block._variantScales.splice(index, 1);
+        drawBlock(block); return;
+      }
+      if (event.target.closest('.variant-reset-scale')) {
+        block._variantScales[index] = 100;
         drawBlock(block); return;
       }
       if (event.target.closest('.variant-make-main')) {
         var selected = block._variantPhotos.splice(index, 1)[0];
+        var selectedScale = block._variantScales.splice(index, 1)[0];
         block._variantPhotos.unshift(selected);
+        block._variantScales.unshift(selectedScale);
         drawBlock(block);
       }
     });
@@ -1506,6 +1538,19 @@
       if (event.target.matches('.pSizeUnit')) {
         var block = event.target.closest('.size-block');
         if (block) drawBlock(block);
+      }
+      if (event.target.matches('.variant-image-scale')) {
+        var photo = event.target.closest('[data-variant-index]');
+        var block = event.target.closest('.size-block');
+        if (!photo || !block) return;
+        var index = Number(photo.getAttribute('data-variant-index'));
+        if (!Number.isInteger(index) || index < 0 || index >= block._variantPhotos.length) return;
+        var scale = safeVariantScale(event.target.value);
+        block._variantScales[index] = scale;
+        var preview = photo.querySelector('.variant-scale-preview');
+        var value = photo.querySelector('.variant-scale-value');
+        if (preview) preview.style.transform = 'scale(' + (scale / 100) + ')';
+        if (value) value.textContent = scale + '%';
       }
     });
 
@@ -1568,6 +1613,7 @@
               throw new Error('Upload succeeded without a valid image URL');
             }
             block._variantPhotos.push(result.url);
+            block._variantScales.push(100);
             savedCount++;
             drawBlock(block);
           }
@@ -1607,12 +1653,18 @@
     var keys = sizes.map(function (row) { return row[0].toLowerCase(); });
     if (new Set(keys).size !== keys.length) { toast('Every size label must be unique', 'error'); return null; }
     var variantImages = {};
+    var variantImageScales = {};
     sizeRows.forEach(function (row) {
       var block = row.closest('.size-block');
       if (!block) return;
       var key = row.querySelector('.pSizeUnit').value.trim();
       var urls = (block._variantPhotos || []).filter(Boolean);
-      if (urls.length) variantImages[key] = urls.slice();
+      if (urls.length) {
+        variantImages[key] = urls.slice();
+        variantImageScales[key] = urls.map(function (_, index) {
+          return Math.max(50, Math.min(160, Number((block._variantScales || [])[index]) || 100));
+        });
+      }
     });
 
     var firstPrice = sizes[0][1];
@@ -1650,6 +1702,7 @@
       img: (variantImages[firstUnit] && variantImages[firstUnit][0]) || imgs[0] || '',
       images: imgs,
       variant_images: variantImages,
+      variant_image_scales: variantImageScales,
       desc: modal.querySelector('#pDesc').value.trim() || '',
       desc_ta: modal.querySelector('#pDescTa').value.trim() || '',
       stock: modal.querySelector('#pStock').checked,
@@ -1685,6 +1738,17 @@
       if (mismatch) {
         throw new Error('Tamil fields NOT saved in Supabase. The deployed demo-payment-kit Edge Function may be an old version. Open Supabase > Edge Functions > demo-payment-kit > Code, apply the Tamil patch and click Deploy updates. Then reload and save again.');
       }
+      var expectedScales = p.variant_image_scales || {};
+      var actualScales = details && details.variant_image_scales;
+      if (Object.keys(expectedScales).some(function (key) {
+        var exp = expectedScales[key];
+        var got = actualScales && actualScales[key];
+        return !Array.isArray(got) || got.length !== exp.length || exp.some(function (n, i) {
+          return Number(n) !== Number(got[i]);
+        });
+      })) {
+        throw new Error('Image size settings were NOT saved. Deploy the updated demo-payment-kit Edge Function before saving size adjustments.');
+      }
       return response;
     });
   }
@@ -1711,6 +1775,7 @@
           desc_ta: typeof meta.desc_ta === 'string' ? meta.desc_ta : '',
           img: img, images: images, sizes: sizes,
           variant_images: meta.variant_images && typeof meta.variant_images === 'object' ? meta.variant_images : {},
+          variant_image_scales: meta.variant_image_scales && typeof meta.variant_image_scales === 'object' ? meta.variant_image_scales : {},
           highlights: Array.isArray(meta.highlights) ? meta.highlights : [],
           highlights_ta: Array.isArray(meta.highlights_ta) ? meta.highlights_ta : [],
           custom: !!meta.custom

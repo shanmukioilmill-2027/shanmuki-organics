@@ -19,7 +19,7 @@ Deno.serve(async req => {
   const extraOrigins = env('ADMIN_ALLOWED_ORIGINS').split(',').map(s => s.trim()).filter(Boolean);
   const allowedOrigin = !origin || localOrigin || [...defaultOrigins, ...extraOrigins].includes(origin);
   const url = new URL(req.url);
-  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload)$/.test(
+  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload|store-settings|site-content)$/.test(
     url.pathname.replace(/^.*\/demo-payment-kit/, '')
   );
   // Never expose demo checkout to hosted origins.
@@ -40,6 +40,77 @@ Deno.serve(async req => {
     if (!admin) return reply({ error: 'Approved admin access required' }, 403, cors);
 
     if (url.pathname.endsWith('/admin-check')) return reply({ admin: true, mode: 'demo' }, 200, cors);
+    // Existing Auth session + ownpay_payment_admins UID was verified above.
+    // A customer with a valid login may NOT publish website changes.
+    if (url.pathname.endsWith('/admin-site-content')) {
+      const raw = await req.text();
+      if (raw.length > 1600000) return reply({ error: 'Website content exceeds 1.6 MB.' }, 413, cors);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
+      if (body.action === 'read') {
+        const { data, error } = await client.from('site_content').select('payload').eq('id', 'global').maybeSingle();
+        if (error) return reply({ error: 'Website content table missing. Apply the editor SQL migration.' }, 503, cors);
+        return reply({ content: data?.payload ?? null }, 200, cors);
+      }
+      if (body.action !== 'publish') return reply({ error: 'Unknown website content action' }, 400, cors);
+      const payload = body.content;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return reply({ error: 'Invalid website content' }, 400, cors);
+      const value = payload as Record<string, unknown>;
+      if (!value.nodes || typeof value.nodes !== 'object' || Array.isArray(value.nodes) ||
+          !value.inserts || typeof value.inserts !== 'object' || Array.isArray(value.inserts))
+        return reply({ error: 'Invalid document structure' }, 400, cors);
+      if (Object.keys(value.nodes as object).length > 1000 || Object.keys(value.inserts as object).length > 75)
+        return reply({ error: 'Too many website elements' }, 400, cors);
+      const permittedUrl = (v: unknown) => typeof v === 'string' && v.length <= 350000 &&
+        (/^https:\/\/[^\s"'<>]+$/.test(v) || /^(?:assets\/img\/|[a-z0-9._/-]+\.html|#|\/)[^\s"'<>]*$/i.test(v) ||
+          /^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(v));
+      for (const [key, record] of Object.entries(value.nodes as Record<string, unknown>)) {
+        if (key.length > 1024 || !record || typeof record !== 'object' || Array.isArray(record))
+          return reply({ error: 'Invalid content element' }, 400, cors);
+        const r = record as Record<string, unknown>;
+        if (typeof r.text === 'string' && r.text.length > 4000) return reply({ error: 'Text too long' }, 400, cors);
+        for (const field of ['src', 'bg', 'href']) {
+          if (r[field] !== undefined && r[field] !== '' && !permittedUrl(r[field]))
+            return reply({ error: 'Unsafe image or link' }, 400, cors);
+        }
+        for (const field of ['bgColor', 'textColor']) {
+          if (r[field] !== undefined && r[field] !== '' &&
+              (typeof r[field] !== 'string' || !/^#[a-fA-F0-9]{6}$/.test(r[field] as string)))
+            return reply({ error: 'Invalid color' }, 400, cors);
+        }
+      }
+      for (const [scope, entries] of Object.entries(value.inserts as Record<string, unknown>)) {
+        if (scope.length > 80 || !Array.isArray(entries) || entries.length > 40)
+          return reply({ error: 'Too many added elements' }, 400, cors);
+        for (const entry of entries) {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return reply({ error: 'Invalid added element' }, 400, cors);
+          const e = entry as Record<string, unknown>;
+          if (!['heading', 'text', 'button', 'icon', 'image', 'spacer'].includes(String(e.type)) ||
+              (typeof e.text === 'string' && e.text.length > 4000) ||
+              (typeof e.src === 'string' && !permittedUrl(e.src)) ||
+              (typeof e.href === 'string' && !permittedUrl(e.href)))
+            return reply({ error: 'Invalid added element content' }, 400, cors);
+        }
+      }
+      const layout = value.layout;
+      if (layout !== undefined) {
+        if (!layout || typeof layout !== 'object' || Array.isArray(layout)) return reply({ error: 'Invalid layout' }, 400, cors);
+        const l = layout as Record<string, unknown>;
+        const ids = ['hero','categories','featured','promos','story','reviews','bestsellers'];
+        if (l.homeOrder !== undefined && (!Array.isArray(l.homeOrder) || l.homeOrder.length !== 7 ||
+            new Set(l.homeOrder).size !== 7 || l.homeOrder.some(id => !ids.includes(String(id)))))
+          return reply({ error: 'Invalid homepage section order' }, 400, cors);
+        if (l.promoColumns !== undefined && ![1,2,3].includes(Number(l.promoColumns)))
+          return reply({ error: 'Invalid promo layout' }, 400, cors);
+        if (l.storyColumns !== undefined && ![1,2,3].includes(Number(l.storyColumns)))
+          return reply({ error: 'Invalid story layout' }, 400, cors);
+      }
+      const stored = { ...value, v: 1, updatedAt: Date.now() };
+      const { error } = await client.from('site_content').upsert({ id: 'global', payload: stored, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+      if (error) return reply({ error: 'Website content could not be published. Apply the editor SQL migration.' }, 503, cors);
+      return reply({ published: true, updatedAt: stored.updatedAt }, 200, cors);
+    }
+
     // Central store settings: server-side allowlisted admin only. Public read
     // happens through Supabase RLS; the storefront never receives write access.
     if (url.pathname.endsWith('/admin-store-settings')) {
@@ -199,11 +270,26 @@ Deno.serve(async req => {
         }
         if (urls.length) variant_images[label] = urls;
       }
+      // Per-photo display scale is optional, stored in admin_details only.
+      // Require the same number of scales as image URLs for every size.
+      const scaleInput = p.variant_image_scales === undefined ? {} : p.variant_image_scales;
+      if (!scaleInput || typeof scaleInput !== 'object' || Array.isArray(scaleInput))
+        return reply({ error: 'Invalid image size settings' }, 400, cors);
+      const variant_image_scales: Record<string, number[]> = {};
+      for (const [label, rawScales] of Object.entries(scaleInput)) {
+        const photos = variant_images[label] || [];
+        if (!allowedSizes.has(label) || !Array.isArray(rawScales) || rawScales.length !== photos.length)
+          return reply({ error: 'Image sizes must match uploaded photos for each variant' }, 400, cors);
+        const scales = rawScales.map((value: unknown) => Number(value));
+        if (scales.some((n: number) => !Number.isInteger(n) || n < 50 || n > 160 || n % 5 !== 0))
+          return reply({ error: 'Image size must be 50–160% in 5% steps' }, 400, cors);
+        variant_image_scales[label] = scales;
+      }
       const rating = Number(p.rating);
       const details = {
         ta: safe(p.ta, 150), badge: safe(p.badge, 80),
         desc_ta: safe(p.desc_ta, 10000), highlights_ta: hlTa.map(item => item.trim()).filter(Boolean),
-        images: p.images, img, sizes, variant_images,
+        images: p.images, img, sizes, variant_images, variant_image_scales,
         highlights: hl, rating: Number.isFinite(rating) ? Math.max(1, Math.min(5, rating)) : 4.5,
         reviews: Math.max(0, Math.min(1000000, Number(p.reviews) || 0)),
         custom: p.custom === true
