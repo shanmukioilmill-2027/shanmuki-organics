@@ -643,9 +643,23 @@
     const x = imagePosition && Number(imagePosition.x), y = imagePosition && Number(imagePosition.y);
     const shiftX = Number.isFinite(x) && Math.abs(x) <= 50 ? x : 0;
     const shiftY = Number.isFinite(y) && Math.abs(y) <= 50 ? y : 0;
+    // The admin alignment editor uses a full 460:420 image stage and applies
+    // translate(x%, y%) scale(size%). The older product card made bottles tiny:
+    // it resized the PHOTO CONTAINER to 24.94% before applying the saved scale.
+    // For photos with saved admin alignment, recreate that full stage in the
+    // existing card artwork. 79.5% card width / 48.9% card height ~= 460:420.
+    // Legacy cards without per-photo metadata retain their original geometry.
+    const hasSavedPhotoLayout = Boolean(photo) && (
+      (Array.isArray(imageScales) && imageScales.length > 0) ||
+      (Array.isArray(imagePositions) && imagePositions.length > 0)
+    );
     const baseImageWidth = bottleLike ? 24.94 : 40;
-    // Keep the original card appearance at 100%, adjusting only its image width.
-    const imageWidth = Math.max(12, Math.min(75, baseImageWidth * scale / 100)).toFixed(2) + '%';
+    const imageWidth = hasSavedPhotoLayout ? '79.5%' : baseImageWidth + '%';
+    const imageTransform = 'translate(' + shiftX + '%, ' + shiftY + '%) scale(' + (scale / 100) + ')';
+    // The original mobile design has a width:52% !important override. Only
+    // aligned photos override that rule, so desktop AND mobile use one stage.
+    const alignedPhotoStyle = hasSavedPhotoLayout
+      ? ' style="left:50%;width:79.5% !important;overflow:hidden"' : '';
     const fallback = '<svg viewBox="0 0 80 88" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M29 12h22v10l7 9v41a7 7 0 0 1-7 7H29a7 7 0 0 1-7-7V31l7-9z"/><path d="M29 13V8h22v5M22 39h36M22 65h36"/><path d="M40 48c-7 1-10 5-9 12 9 0 13-5 9-12zm0 0c6 1 11 6 10 12-7 0-12-4-10-12z"/></svg>';
     const frame = '<svg class="so-exact-card__frame" viewBox="0 0 1163 1080" preserveAspectRatio="none" aria-hidden="true"><path d="M 126 35 L 1026 35 C 1082 35 1127 80 1127 136 L 1127 958 L 433 958 L 357 1034 L 36 1034 L 36 136 C 36 80 81 35 126 35 Z"/></svg>';
     const heart = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 42.5 6.9 26.8C-1.6 18.9 4 6.8 14.2 6.8c4.4 0 7.6 2.3 9.8 5.8 2.2-3.5 5.4-5.8 9.8-5.8 10.2 0 15.8 12.1 7.3 20L24 42.5Z"/></svg>';
@@ -654,8 +668,8 @@
     const arrow = '<span class="so-exact-card__arrow" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="7.4 7.5 20 20.3" focusable="false"><path d="M25.704,8.394h-8.379c-.467.008-.84.394-.832.861.008.456.376.824.832.832h6.335s-10.525,10.525-10.525,10.525c-.331.331-.331.866,0,1.197s.866.331,1.197,0l10.525-10.525v6.335c-.008.467.364.853.832.861s.853-.364.861-.832c0-.01,0-.02,0-.029v-8.379c0-.467-.379-.846-.846-.846h0Z"/><path d="M24.84,20.367v3.009c0,.99-.81,1.8-1.8,1.8h-11.34c-.99,0-1.8-.81-1.8-1.8v-11.34c0-.99.81-1.8,1.8-1.8h3.052c.552,0,1-.448,1-1h0c0-.552-.448-1-1-1h-3.052c-2.099,0-3.8,1.701-3.8,3.8v11.34c0,2.09,1.71,3.8,3.8,3.8h11.34c2.099,0,3.8-1.701,3.8-3.8v-3.009c0-.552-.448-1-1-1h0c-.552,0-1,.448-1,1Z"/></svg></span>';
     return '<article class="so-exact-card" data-slug="' + slug + '" style="--so-image-width:' + imageWidth + '" aria-label="' + esc(name) + '">' +
       frame +
-      '<a class="so-exact-card__photo-link' + (photo ? '' : ' is-broken') + '" href="' + url + '" aria-label="View ' + esc(name) + '">' +
-      (photo ? '<img data-so-card-image src="' + esc(photo) + '" alt="' + esc(name) + '" loading="lazy" style="transform:translate(' + shiftX + '%, ' + shiftY + '%);transform-origin:center center">' : '') +
+      '<a class="so-exact-card__photo-link' + (photo ? '' : ' is-broken') + '"' + alignedPhotoStyle + ' href="' + url + '" aria-label="View ' + esc(name) + '">' +
+      (photo ? '<img data-so-card-image src="' + esc(photo) + '" alt="' + esc(name) + '" loading="lazy" style="transform:' + imageTransform + ';transform-origin:center center">' : '') +
       '<span class="so-exact-card__fallback">' + fallback + '<span>Product photo coming soon</span></span></a>' +
       (badge ? '<span class="so-exact-card__discount' + (!p.stock ? ' so-exact-card__discount--out' : '') + '">' + esc(badge) + '</span>' : '') +
       '<button type="button" class="so-exact-card__wish" data-wish="' + slug + '" aria-label="Add ' + esc(name) + ' to wishlist">' + heart + '</button>' +
