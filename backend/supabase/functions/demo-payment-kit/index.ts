@@ -19,7 +19,7 @@ Deno.serve(async req => {
   const extraOrigins = env('ADMIN_ALLOWED_ORIGINS').split(',').map(s => s.trim()).filter(Boolean);
   const allowedOrigin = !origin || localOrigin || [...defaultOrigins, ...extraOrigins].includes(origin);
   const url = new URL(req.url);
-  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload|store-settings|site-content|banners)$/.test(
+  const isAdminAction = /^\/admin-(check|payments|orders|customers|categories|category-upsert|category-delete|products|product-upsert|product-delete|image-upload|store-settings|site-content|banners|homepage-sections)$/.test(
     url.pathname.replace(/^.*\/demo-payment-kit/, '')
   );
   // Never expose demo checkout to hosted origins.
@@ -40,6 +40,44 @@ Deno.serve(async req => {
     if (!admin) return reply({ error: 'Approved admin access required' }, 403, cors);
 
     if (url.pathname.endsWith('/admin-check')) return reply({ admin: true, mode: 'demo' }, 200, cors);
+    // Curated homepage category collections. The existing approved-admin UID
+    // check above is mandatory; public clients have SELECT ONLY through RLS.
+    if (url.pathname.endsWith('/admin-homepage-sections')) {
+      const raw = await req.text();
+      if (raw.length > 6000) return reply({ error: 'Homepage request too large' }, 413, cors);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
+      if (body.action === 'list') {
+        const { data, error } = await client.from('homepage_product_sections')
+          .select('section_key,category_slugs,product_limit,updated_at').order('section_key');
+        if (error) { console.error('[homepage-sections] read', error.code); return reply({ error: 'Homepage settings unavailable (' + error.code + '). Run the homepage SQL migration.' }, 503, cors); }
+        return reply({ sections: data || [] }, 200, cors);
+      }
+      if (body.action !== 'save') return reply({ error: 'Unknown homepage action' }, 400, cors);
+      if (!['featured','bestseller'].includes(String(body.section_key)))
+        return reply({ error: 'Invalid homepage section' }, 400, cors);
+      if (!Array.isArray(body.category_slugs) || body.category_slugs.length < 1 || body.category_slugs.length > 30 ||
+          body.category_slugs.some(s => typeof s !== 'string' || !/^[a-z0-9][a-z0-9-]{0,99}$/.test(s)) ||
+          new Set(body.category_slugs).size !== body.category_slugs.length)
+        return reply({ error: 'Choose 1 to 30 valid categories' }, 400, cors);
+      const limit = Number(body.product_limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 24)
+        return reply({ error: 'Product limit must be between 1 and 24' }, 400, cors);
+      // Validate all slugs against the current database, not client-side labels.
+      const { data: categories, error: categoriesError } = await client.from('categories')
+        .select('slug').in('slug', body.category_slugs as string[]);
+      if (categoriesError) return reply({ error: 'Could not verify categories' }, 503, cors);
+      if (!Array.isArray(categories) || categories.length !== body.category_slugs.length)
+        return reply({ error: 'One or more selected categories no longer exist. Refresh the page.' }, 409, cors);
+      const record = { section_key: body.section_key, category_slugs: body.category_slugs,
+        product_limit: limit, updated_at: new Date().toISOString() };
+      const { data, error } = await client.from('homepage_product_sections')
+        .upsert(record, { onConflict: 'section_key' })
+        .select('section_key,category_slugs,product_limit,updated_at').single();
+      if (error) { console.error('[homepage-sections] save', error.code); return reply({ error: 'Homepage settings save failed (' + error.code + ')' }, 500, cors); }
+      return reply({ saved: true, section: data }, 200, cors);
+    }
+
     // Approved-admin banner CRUD. All writes are made with the server-only service role.
     // The storefront reads active rows through the separate read-only RLS policy.
     if (url.pathname.endsWith('/admin-banners')) {
