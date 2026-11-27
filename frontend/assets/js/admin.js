@@ -2257,9 +2257,9 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Same Admin + Storefront Preview (v8): Only the PHOTO moves and zooms within the fixed circle. 50% is the minimum zoom that fills the circle; larger values zoom in. Admin and storefront use the same rendering code. Apply Alignment, then Save.</p>' +
-          '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Fixed circle — zoom and move only the PHOTO (v8)</div>' +
-          '<div data-cat-align-stage style="background:#fff;border:0;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative;box-shadow:0 0 0 1px #d7e2d4"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:cover;border-radius:0;display:block;pointer-events:none;transform-origin:center center"></div>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Fixed Circle Frame (v9): The border and circle never move or resize. Drag or adjust the sliders to move and zoom ONLY the photo behind the fixed circular mask. 50% = minimum fill zoom. Apply Alignment, then Save.</p>' +
+          '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Fixed outer circle — only PHOTO can zoom / move (v9)</div>' +
+          '<div data-cat-align-stage data-category-fixed-frame style="position:relative;isolation:isolate;contain:layout paint;background:#fff;overflow:hidden;border-radius:50%;width:min(100%,420px);aspect-ratio:1/1;margin:0 auto;cursor:grab;touch-action:none;user-select:none;box-shadow:0 0 0 1px #d7e2d4"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Photo moving inside fixed circular frame" draggable="false" style="position:absolute;display:block;pointer-events:none;user-select:none;max-width:none;max-height:none;border-radius:0;transform:none;object-fit:fill"><span data-cat-align-fixed-ring aria-hidden="true" style="position:absolute;inset:0;z-index:3;border-radius:50%;box-shadow:inset 0 0 0 1px #d7e2d4;pointer-events:none"></span></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
             '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
             '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-cat-align-x-label></output><input data-cat-align-x type="range" min="-50" max="50" step="1"></label>' +
@@ -2270,10 +2270,12 @@
         '</div>';
       document.body.appendChild(layer);
       var stage = layer.querySelector('[data-cat-align-stage]');
-      if (!SITE || SITE.categoryPhotoRendererVersion !== 'v8-fixed-cover-20261127') {
+      // Do not transform or resize stage: it is the immovable circular clipping frame.
+      stage.style.transform = 'none';
+      if (!SITE || SITE.categoryPhotoRendererVersion !== 'v9-fixed-frame-20261127') {
         var message = document.createElement('p');
         message.style.cssText = 'color:#b42318;background:#fff2f0;padding:9px;border-radius:6px;margin:6px 0';
-        message.textContent = 'Category preview version mismatch. Refresh this Admin page and verify data.js/admin.js have both been deployed (v8).';
+        message.textContent = 'Category preview version mismatch. Refresh this Admin page and verify data.js/admin.js have both been deployed (v9).';
         layer.querySelector('[data-cat-align-stage]').parentElement.insertBefore(message, layer.querySelector('[data-cat-align-stage]'));
       }
       var image = layer.querySelector('[data-cat-align-image]');

@@ -664,7 +664,7 @@
     };
   }
 
-  /* CATEGORY PHOTO — FIXED CIRCLE, IDENTICAL ADMIN/STOREFRONT (v8)
+  /* CATEGORY PHOTO — FIXED FRAME & MOVING PHOTO, ADMIN/STOREFRONT (v9)
    * A previous deployment mixed the old Admin full-cover preview with the
    * new storefront 0.9 * sliderSize inner-photo rendering. 50% then
    * filled the Admin circle but shrank the same photo to 45% in storefront.
@@ -687,7 +687,11 @@
       host.style.padding = '0';
       host.style.boxSizing = 'border-box';
       host.style.borderRadius = '50%';
+      // Keep the FRAME invariant; all scale/translation is applied to the IMG.
       host.style.transform = 'none';
+      host.style.isolation = 'isolate';
+      host.style.contain = 'layout paint';
+      host.dataset.categoryFixedFrame = 'v9';
     }
     var frameW = host.clientWidth, frameH = host.clientHeight;
     if (frameW < 1 || frameH < 1) return;
@@ -737,9 +741,12 @@
     img.style.background = 'transparent';
     img.style.filter = 'none';
     img.style.zIndex = '1';
-    img.dataset.categoryPhotoRenderer = 'v8';
+    img.style.pointerEvents = 'none';
+    img.style.userSelect = 'none';
+    img.style.transition = 'none';
+    img.dataset.categoryPhotoRenderer = 'v9';
   }
-  window.SITE.categoryPhotoRendererVersion = 'v8-fixed-cover-20261127';
+  window.SITE.categoryPhotoRendererVersion = 'v9-fixed-frame-20261127';
   window.SITE.fitCategoryImage = fitCategoryImage;
   window.SITE.categoryImageTransform = categoryImageTransform;
   window.SITE.loadCatalog = function () {
