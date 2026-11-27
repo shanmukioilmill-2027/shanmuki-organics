@@ -59,19 +59,40 @@
       track.innerHTML = SITE.categories.map(function (c) {
         const n = SITE.incat(c.slug).length;
         const imgSrc = c.img ? c.img : 'assets/img/categories/' + c.slug + '.svg';
-        const imgStyle = c.img ? 'width:100%;height:100%;object-fit:cover;border-radius:50%;transform-origin:center center;transform:' + SITE.categoryImageTransform(c.image_alignment) : '';
+        const imgStyle = c.img ? 'width:100%;height:100%;object-fit:contain;object-position:center;transform:none;background:transparent' : '';
         const fallback = 'assets/img/categories/' + c.slug + '.svg';
         return '<a class="catcard" href="products.html?cat=' + c.slug + '" data-cat-slug="' + c.slug + '">' +
-          '<span class="catcard__img"><img src="' + imgSrc + '" alt="' + esc(c.name) + '" loading="lazy" style="' + imgStyle + '" data-fallback="' + fallback + '"></span>' +
+          '<span class="catcard__img"><img src="' + imgSrc + '" alt="' + esc(c.name) + '" loading="lazy" style="' + imgStyle + '" data-category-fit="' + (c.img ? esc(c.slug) : '') + '" data-fallback="' + fallback + '"></span>' +
           '<b>' + esc(c.name) + '</b><span>' + esc(c.ta) + '</span>' +
           (withCount ? '<span class="catcard__count">' + n + ' products</span>' : '') + '</a>';
       }).join('');
       /* safe fallback: if uploaded image fails, revert to the SVG icon */
       track.querySelectorAll('img[data-fallback]').forEach(function (img) {
         img.addEventListener('error', function () {
+          img.removeAttribute('data-category-fit');
           img.src = img.getAttribute('data-fallback');
           img.style.cssText = '';
         });
+      });
+
+      /* Fit the entire uploaded category image, even after resize. */
+      track.querySelectorAll('img[data-category-fit]').forEach(function (img) {
+        var slug = img.getAttribute('data-category-fit');
+        if (!slug) return;
+        var category = SITE.cat(slug);
+        if (!category || typeof SITE.fitCategoryImage !== 'function') return;
+        var refresh = function () {
+          if (img.getAttribute('data-category-fit') !== slug) return;
+          SITE.fitCategoryImage(img, category.image_alignment, !!img.closest('.catrail--circle'));
+        };
+        img.addEventListener('load', refresh);
+        if (img.complete && img.naturalWidth) refresh();
+        if (typeof ResizeObserver === 'function') {
+          var observer = new ResizeObserver(refresh);
+          observer.observe(img.parentElement);
+        } else {
+          window.addEventListener('resize', refresh);
+        }
       });
 
       /* auto-sliding carousel for the home circle rail:

@@ -2212,7 +2212,7 @@
       '<div style="font-size:11px;color:#92a096;margin-top:4px">PNG / JPG / WebP up to 5MB · best 800×600 px</div>' +
       '</div>' +
       '<div id="catImgPreview" style="' + previewStyle + 'position:relative;border-radius:10px;overflow:hidden;border:1px solid #e2e8e0;margin-top:6px">' +
-      '<div style="overflow:hidden;height:180px;background:#fff"><img id="catImgThumb" src="' + escHtml(c.img || '') + '" role="button" tabindex="0" aria-label="Adjust category image size and position" title="Click or press Enter to adjust image" style="width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;transform-origin:center center;transform:' + categoryImageTransform(categoryAlign) + '" alt="Category preview"></div>' +
+      '<div style="overflow:hidden;height:260px;background:#fff"><img id="catImgThumb" src="' + escHtml(c.img || '') + '" role="button" tabindex="0" aria-label="Adjust category image size and position" title="Click or press Enter to adjust image" style="width:100%;height:100%;object-fit:contain;display:block;cursor:zoom-in;transform-origin:center center;" alt="Category preview"></div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#f8f9f6">' +
       '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to adjust its size and position</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
@@ -2229,8 +2229,12 @@
     var hiddenInput = modal.querySelector('#catImg');
     var adjustBtn = modal.querySelector('#catImgAdjust');
     function updateCategoryPreview() {
-      thumb.style.transform = categoryImageTransform(categoryAlignmentFromForm(modal));
+      if (SITE && typeof SITE.fitCategoryImage === 'function') {
+        SITE.fitCategoryImage(thumb, categoryAlignmentFromForm(modal), false);
+      }
     }
+    thumb.addEventListener('load', updateCategoryPreview);
+    requestAnimationFrame(updateCategoryPreview);
     function resetCategoryAlignment() {
       modal.querySelector('#catAlignScale').value = '100';
       modal.querySelector('#catAlignX').value = '0';
@@ -2253,8 +2257,8 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Drag the picture inside the preview, or adjust the size and Left / Right, Up / Down sliders. The storefront displays category images inside circles.</p>' +
-          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:14px;overflow:hidden;width:min(100%,460px);margin:0 auto;aspect-ratio:460/420;cursor:grab;touch-action:none;user-select:none"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Category alignment preview" draggable="false" style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;transform-origin:center center"></div>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">The entire uploaded image stays visible. Adjust its size and position; movement and zoom are limited so no edge gets cut. Storefront category images remain circular.</p>' +
+          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:14px;overflow:hidden;width:min(100%,460px);margin:0 auto;aspect-ratio:460/420;cursor:grab;touch-action:none;user-select:none"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Category alignment preview" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;transform-origin:center center"></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
             '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
             '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-cat-align-x-label></output><input data-cat-align-x type="range" min="-50" max="50" step="1"></label>' +
@@ -2270,7 +2274,9 @@
       var x = layer.querySelector('[data-cat-align-x]');
       var y = layer.querySelector('[data-cat-align-y]');
       function paint() {
-        image.style.transform = categoryImageTransform(alignment);
+        if (SITE && typeof SITE.fitCategoryImage === 'function') {
+          SITE.fitCategoryImage(image, alignment, false);
+        }
         s.value = alignment.scale;
         x.value = alignment.x;
         y.value = alignment.y;
@@ -2294,6 +2300,7 @@
           close();
         }
       });
+      image.addEventListener('load', paint);
       s.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:s.value,x:alignment.x,y:alignment.y}); paint(); });
       x.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:x.value,y:alignment.y}); paint(); });
       y.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:alignment.x,y:y.value}); paint(); });
@@ -2444,7 +2451,7 @@
       '<tbody>' + cats.map(function (c, i) {
         var count = products.filter(function (p) { return p.cat === c.slug; }).length;
         var imgCell = c.img
-          ? '<img src="' + escHtml(c.img) + '" alt="' + escHtml(c.name) + '" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid #e2e8e0;display:block">'
+          ? '<img src="' + escHtml(c.img) + '" alt="' + escHtml(c.name) + '" style="width:40px;height:40px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #e2e8e0;display:block">'
           : '<span aria-label="No image">—</span>';
         return '<tr><td>' + (i + 1) + '</td><td>' + imgCell + '</td><td><b>' + escHtml(c.name) + '</b></td><td>' + escHtml(c.ta) + '</td><td><code>' + escHtml(c.slug) + '</code></td><td>' + count + '</td>' +
           '<td><button class="btn-sm" data-edit-cat="' + escHtml(c.slug) + '">✏️ Edit</button> <button class="btn-sm btn-sm--danger" data-delete-cat="' + escHtml(c.slug) + '">🗑️</button></td></tr>';

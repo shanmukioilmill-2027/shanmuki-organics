@@ -664,6 +664,54 @@
     };
   }
 
+  /* Category Image: full-photo, non-cropping placement for admin preview and storefront.
+   * Scale 50..160 selects a size BETWEEN safe limits, not CSS zoom past the frame.
+   * X/Y controls reposition the whole image only within its available free space.
+   * For circles, all four photo corners stay inside the inner circle.
+   * No upload bytes or server metadata are modified by this layout helper. */
+  function fitCategoryImage(img, alignment, circle) {
+    if (!img || !img.parentElement || !img.naturalWidth || !img.naturalHeight) return;
+    var host = img.parentElement;
+    var frameW = host.clientWidth, frameH = host.clientHeight;
+    if (frameW < 1 || frameH < 1) return; // e.g. category preview not visible yet
+    var a = categoryAlignment(alignment);
+    var nw = img.naturalWidth, nh = img.naturalHeight;
+    var maxFit = circle
+      ? (Math.min(frameW, frameH) * 0.94) / Math.hypot(nw, nh)
+      : Math.min(frameW * 0.96 / nw, frameH * 0.96 / nh);
+    // Keep full photo visible at every slider value. At 160% it reaches the
+    // largest uncropped size; at 50% it is smaller with more room to reposition.
+    var safeSize = 0.55 + (a.scale - 50) * 0.45 / 110;
+    var w = nw * maxFit * safeSize, h = nh * maxFit * safeSize;
+    var dx = (frameW - w) / 2 * a.x / 50;
+    var dy = (frameH - h) / 2 * a.y / 50;
+    if (circle) {
+      // Movement inside a circle is more constrained than movement inside a box.
+      // Clamping corners avoids a rectangular photo being cut by the circle.
+      var r = Math.min(frameW, frameH) * 0.475;
+      var maxDy = Math.max(0, Math.sqrt(Math.max(0, r * r - w * w / 4)) - h / 2);
+      dy = Math.max(-maxDy, Math.min(maxDy, dy));
+      var maxDx = Math.max(0, Math.sqrt(Math.max(0, r * r - Math.pow(Math.abs(dy) + h / 2, 2))) - w / 2);
+      dx = Math.max(-maxDx, Math.min(maxDx, dx));
+    }
+    host.style.position = 'relative';
+    img.style.position = 'absolute';
+    img.style.width = w + 'px';
+    img.style.height = h + 'px';
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    img.style.left = ((frameW - w) / 2 + dx) + 'px';
+    img.style.top = ((frameH - h) / 2 + dy) + 'px';
+    img.style.transform = 'none';
+    img.style.transformOrigin = 'center center';
+    img.style.objectFit = 'contain';
+    img.style.objectPosition = 'center center';
+    img.style.borderRadius = '0';
+    img.style.padding = '0';
+    img.style.margin = '0';
+    img.style.background = 'transparent';
+  }
+  window.SITE.fitCategoryImage = fitCategoryImage;
   window.SITE.categoryImageTransform = categoryImageTransform;
   window.SITE.loadCatalog = function () {
     if (catalogPromise) return catalogPromise;
