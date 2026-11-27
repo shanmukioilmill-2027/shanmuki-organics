@@ -42,41 +42,64 @@ Deno.serve(async req => {
     if (url.pathname.endsWith('/admin-check')) return reply({ admin: true, mode: 'demo' }, 200, cors);
     // Curated homepage category collections. The existing approved-admin UID
     // check above is mandatory; public clients have SELECT ONLY through RLS.
-    if (url.pathname.endsWith('/admin-homepage-sections')) {
-      const raw = await req.text();
-      if (raw.length > 6000) return reply({ error: 'Homepage request too large' }, 413, cors);
-      let body: Record<string, unknown>;
-      try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
-      if (body.action === 'list') {
-        const { data, error } = await client.from('homepage_product_sections')
-          .select('section_key,category_slugs,product_limit,updated_at').order('section_key');
-        if (error) { console.error('[homepage-sections] read', error.code); return reply({ error: 'Homepage settings unavailable (' + error.code + '). Run the homepage SQL migration.' }, 503, cors); }
-        return reply({ sections: data || [] }, 200, cors);
-      }
-      if (body.action !== 'save') return reply({ error: 'Unknown homepage action' }, 400, cors);
-      if (!['featured','bestseller'].includes(String(body.section_key)))
-        return reply({ error: 'Invalid homepage section' }, 400, cors);
-      if (!Array.isArray(body.category_slugs) || body.category_slugs.length < 1 || body.category_slugs.length > 30 ||
-          body.category_slugs.some(s => typeof s !== 'string' || !/^[a-z0-9][a-z0-9-]{0,99}$/.test(s)) ||
-          new Set(body.category_slugs).size !== body.category_slugs.length)
-        return reply({ error: 'Choose 1 to 30 valid categories' }, 400, cors);
-      const limit = Number(body.product_limit);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 24)
-        return reply({ error: 'Product limit must be between 1 and 24' }, 400, cors);
-      // Validate all slugs against the current database, not client-side labels.
-      const { data: categories, error: categoriesError } = await client.from('categories')
-        .select('slug').in('slug', body.category_slugs as string[]);
-      if (categoriesError) return reply({ error: 'Could not verify categories' }, 503, cors);
-      if (!Array.isArray(categories) || categories.length !== body.category_slugs.length)
-        return reply({ error: 'One or more selected categories no longer exist. Refresh the page.' }, 409, cors);
-      const record = { section_key: body.section_key, category_slugs: body.category_slugs,
-        product_limit: limit, updated_at: new Date().toISOString() };
-      const { data, error } = await client.from('homepage_product_sections')
-        .upsert(record, { onConflict: 'section_key' })
-        .select('section_key,category_slugs,product_limit,updated_at').single();
-      if (error) { console.error('[homepage-sections] save', error.code); return reply({ error: 'Homepage settings save failed (' + error.code + ')' }, 500, cors); }
-      return reply({ saved: true, section: data }, 200, cors);
+if (url.pathname.endsWith('/admin-homepage-sections')) {
+  const raw = await req.text();
+  if (raw.length > 30000) return reply({ error: 'Homepage request too large' }, 413, cors);
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
+  if (body.action === 'list') {
+    const { data, error } = await client.from('homepage_product_sections')
+      .select('section_key,category_slugs,product_slugs,product_limit,updated_at').order('section_key');
+    if (error) { console.error('[homepage-sections] read', error.code); return reply({ error: 'Homepage settings unavailable (' + error.code + '). Run the v17 SQL migration.' }, 503, cors); }
+    return reply({ sections: data || [] }, 200, cors);
+  }
+  if (body.action !== 'save') return reply({ error: 'Unknown homepage action' }, 400, cors);
+  const sectionKey = String(body.section_key || '');
+  if (!['featured','bestseller'].includes(sectionKey))
+    return reply({ error: 'Invalid homepage section' }, 400, cors);
+  const validSlug = (s: unknown) => typeof s === 'string' && /^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
+  if (!Array.isArray(body.category_slugs) || body.category_slugs.length < 1 || body.category_slugs.length > 50 ||
+      body.category_slugs.some(s => !validSlug(s)) ||
+      new Set(body.category_slugs).size !== body.category_slugs.length)
+    return reply({ error: 'Select 1 to 50 valid categories.' }, 400, cors);
+  const productSlugs = body.product_slugs;
+  if (!Array.isArray(productSlugs) || (sectionKey === 'featured' && productSlugs.length !== 4) ||
+      (sectionKey === 'bestseller' && (productSlugs.length < 1 || productSlugs.length > 200)) ||
+      productSlugs.some(s => !validSlug(s)) || new Set(productSlugs).size !== productSlugs.length)
+    return reply({ error: sectionKey === 'featured' ? 'Select exactly four Featured Products.' : 'Select 1 to 200 Best Selling products.' }, 400, cors);
+  // All product slugs must exist and belong to the chosen category or a
+  // nested subcategory. Do not trust catalog metadata from the browser.
+  const { data: categories, error: categoriesError } = await client.from('categories').select('slug,parent_slug');
+  if (categoriesError || !Array.isArray(categories)) return reply({ error: 'Could not verify categories' }, 503, cors);
+  const categoryMap = new Map<string, string | null>(categories.map(c => [c.slug, c.parent_slug || null]));
+  if (body.category_slugs.some(s => !categoryMap.has(s as string)))
+    return reply({ error: 'A chosen category no longer exists. Refresh and reselect.' }, 409, cors);
+  const { data: products, error: productsError } = await client.from('products')
+    .select('slug,category_slug').in('slug', productSlugs as string[]);
+  if (productsError || !Array.isArray(products)) return reply({ error: 'Could not verify products' }, 503, cors);
+  if (products.length !== productSlugs.length)
+    return reply({ error: 'A chosen product no longer exists. Refresh and reselect.' }, 409, cors);
+  const isDescendant = (ancestor: string, category: string) => {
+    let current: string | null = category;
+    const seen = new Set<string>();
+    while (current && !seen.has(current)) {
+      if (current === ancestor) return true;
+      seen.add(current);
+      current = categoryMap.get(current) || null;
     }
+    return false;
+  };
+  if (products.some(p => !(body.category_slugs as string[]).some(c => isDescendant(c, p.category_slug))))
+    return reply({ error: 'A selected product is outside the chosen categories. Refresh the page.' }, 400, cors);
+  const record = { section_key: sectionKey,
+    category_slugs: body.category_slugs, product_slugs: productSlugs,
+    product_limit: productSlugs.length, updated_at: new Date().toISOString() };
+  const { data, error } = await client.from('homepage_product_sections')
+    .upsert(record, { onConflict: 'section_key' })
+    .select('section_key,category_slugs,product_slugs,product_limit,updated_at').single();
+  if (error) { console.error('[homepage-sections] save', error.code); return reply({ error: 'Homepage product selection save failed (' + error.code + ')' }, 500, cors); }
+  return reply({ saved: true, section: data }, 200, cors);
+}
 
     // Approved-admin banner CRUD. All writes are made with the server-only service role.
     // The storefront reads active rows through the separate read-only RLS policy.

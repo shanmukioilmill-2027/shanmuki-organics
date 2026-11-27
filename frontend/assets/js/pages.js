@@ -45,7 +45,7 @@
     const client = window.SupabaseClient;
     if (!client || typeof client.from !== 'function') return;
     const result = await client.from('homepage_product_sections')
-      .select('section_key,category_slugs,product_limit').in('section_key',['featured','bestseller']);
+      .select('section_key,category_slugs,product_slugs,product_limit').in('section_key',['featured','bestseller']);
     if (result.error) {
       // Missing table = older deployment. Keep the original featured/bestseller
       // behavior until its migration is applied. Other errors are visible.
@@ -61,6 +61,15 @@
   function chosenHomepageProducts(spec) {
     const settings = homepageProductChoices && homepageProductChoices[spec];
     if (!settings || !Array.isArray(settings.category_slugs)) return null;
+    // v17 explicit admin picks: render exactly these cards, in chosen order.
+    // Older v16 rows (product_slugs = NULL) retain their category-based view
+    // until the admin first clicks Save & Publish on that section.
+    if (Array.isArray(settings.product_slugs)) {
+      return settings.product_slugs.map(function (slug) { return SITE.byslug(slug); })
+        .filter(function (p) {
+          return p && settings.category_slugs.some(function (c) { return categoryIsAncestor(c, p.cat); });
+        });
+    }
     const matching = [], seen = new Set();
     settings.category_slugs.forEach(function (categorySlug) {
       SITE.products.forEach(function (p) {
@@ -83,7 +92,7 @@
       const spec = host.getAttribute('data-rail');
       const chosenSettings = homepageProductChoices && homepageProductChoices[host.getAttribute('data-rail')];
       const limit = chosenSettings && Array.isArray(chosenSettings.category_slugs)
-        ? Number(chosenSettings.product_limit) || 4
+        ? (Array.isArray(chosenSettings.product_slugs) ? chosenSettings.product_slugs.length : Number(chosenSettings.product_limit) || 4)
         : parseInt(host.getAttribute('data-limit') || '0', 10);
       let list = [];
       if (spec === 'featured') list = chosenHomepageProducts('featured') ?? SITE.featured();
@@ -1562,8 +1571,8 @@
         // Never show arbitrary stale product picks when a configured read fails.
         console.error('[SO] Homepage preferences unavailable:', error);
         homepageProductChoices = {
-          featured: { category_slugs: [], product_limit: 4 },
-          bestseller: { category_slugs: [], product_limit: 4 }
+          featured: { category_slugs: [], product_slugs: [], product_limit: 4 },
+          bestseller: { category_slugs: [], product_slugs: [], product_limit: 4 }
         };
       }
     }

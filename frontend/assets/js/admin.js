@@ -4039,30 +4039,34 @@
     });
   }
 
-  /* ============================== HOMEPAGE PRODUCT COLLECTIONS (v16) === */
-  // Categories are chosen by an approved admin and saved on the server;
-  // nothing is written to browser localStorage or to the product catalog.
+  /* ============= HOMEPAGE PRODUCT PICKER (v17 — image & exact cards) ===== */
+  // v17 stores chosen product slugs, not image binaries: source images remain
+  // in the protected product catalog. All writes use the approved-admin API.
   var homeSectionLoadId = 0;
   function renderHomeProductSection(sectionKey) {
     var myId = ++homeSectionLoadId;
-    var pageKey = sectionKey === 'featured' ? 'home-featured' : 'home-bestseller';
     var heading = sectionKey === 'featured' ? 'Featured Products' : 'Best Selling This Month';
-    content.innerHTML = '<p role="status">Loading ' + heading + ' settings and categories from Supabase…</p>';
+    var featured = sectionKey === 'featured';
+    content.innerHTML = '<p role="status">Loading ' + heading + ' and product images from Supabase…</p>';
     Promise.all([
       demoAdminRequest('admin-homepage-sections', { action: 'list' }),
       fetchCategoriesFromSupabase(), fetchProductsFromSupabase()
     ]).then(function (result) {
       if (myId !== homeSectionLoadId || pageTitle.textContent !== heading) return;
       var sections = result[0].sections || [];
-      var row = sections.find(function (s) { return s.section_key === sectionKey; }) || {};
+      var row = sections.find(function (r) { return r.section_key === sectionKey; }) || {};
       var cats = result[1], products = result[2];
-      var selected = Array.isArray(row.category_slugs) ? row.category_slugs.slice() : [];
-      var limit = Number(row.product_limit) || 4;
-      var tree = orderedCategoryTree(cats);
+      var selectedCategories = Array.isArray(row.category_slugs) ? row.category_slugs.slice() : [];
+      var savedProductSlugs = Array.isArray(row.product_slugs) ? row.product_slugs.slice() : null;
+      var publishedSlugs = savedProductSlugs ? savedProductSlugs.slice() : null;
+      var selectedProductSlugs = savedProductSlugs ? savedProductSlugs.slice() : [];
+      var productBySlug = {};
+      products.forEach(function (p) { productBySlug[p.slug] = p; });
       var catsBySlug = {};
       cats.forEach(function (c) { catsBySlug[c.slug] = c; });
-      function belongsTo(ancestor, productCategory) {
-        var seen = {}, slug = productCategory;
+      var tree = orderedCategoryTree(cats);
+      function belongsTo(ancestor, categorySlug) {
+        var slug = categorySlug, seen = {};
         while (slug && !seen[slug]) {
           if (slug === ancestor) return true;
           seen[slug] = true;
@@ -4070,85 +4074,191 @@
         }
         return false;
       }
-      function includedProducts() {
-        var used = {};
-        var matching = [];
-        selected.forEach(function (slug) {
-          products.forEach(function (p) {
-            if (belongsTo(slug, p.cat) && !used[p.slug]) {
-              used[p.slug] = true; matching.push(p);
-            }
-          });
+      function matchingProducts() {
+        return products.filter(function (p) {
+          return selectedCategories.some(function (c) { return belongsTo(c, p.cat); });
         });
-        if (sectionKey === 'bestseller') matching.sort(function (a,b) {
-          return (b.reviews || 0) - (a.reviews || 0) || (b.rating || 0) - (a.rating || 0);
-        });
-        return matching;
       }
+      // Show v16 category matches as an initial, *unpublished* draft so admins
+      // can move to explicit choices without unexpectedly blanking the page.
+      if (!savedProductSlugs && selectedCategories.length) {
+        var old = matchingProducts();
+        if (!featured) old.sort(function (a,b) {
+          return (Number(b.reviews)||0) - (Number(a.reviews)||0) ||
+            (Number(b.rating)||0) - (Number(a.rating)||0);
+        });
+        selectedProductSlugs = old.slice(0, featured ? 4 : (Number(row.product_limit)||4))
+          .map(function (p) { return p.slug; });
+      }
+      function productPicture(p) {
+        // Same image priority as the storefront: first pack variant photo,
+        // followed by the regular catalog image/gallery.
+        var firstSize = p && p.sizes && p.sizes[0] && p.sizes[0][0];
+        var packPhotos = p && p.variant_images && firstSize && p.variant_images[firstSize];
+        var url = (Array.isArray(packPhotos) && packPhotos[0]) ||
+          (p && (p.img || (p.images && p.images[0]))) || '';
+        return url ? '<img src="' + escHtml(url) + '" alt="' + escHtml(p.name) + '" loading="lazy" style="width:92px;height:96px;object-fit:contain;border-radius:8px;background:#f1f9eb;flex:none" onerror="this.style.display=\'none\'">' :
+          '<span aria-label="No product image" style="width:92px;height:96px;flex:none;display:grid;place-items:center;background:#eef5e9;color:#678064;border-radius:8px;font-size:11px">No photo</span>';
+      }
+      function priceLabel(p) {
+        return '₹' + (Number(p.price)||0).toLocaleString('en-IN');
+      }
+      function categoryLabel(p) {
+        return escHtml(catsBySlug[p.cat] && catsBySlug[p.cat].name || p.cat || '');
+      }
+      function selectedProducts() {
+        return selectedProductSlugs.map(function (slug) { return productBySlug[slug]; }).filter(Boolean);
+      }
+      function snapshot() {
+        return JSON.stringify({ cats: selectedCategories, products: selectedProductSlugs });
+      }
+      var publishedSnapshot = JSON.stringify({ cats: selectedCategories, products: publishedSlugs });
       content.innerHTML =
-        '<div class="page-toolbar"><h3>' + heading + ' — Homepage</h3>' +
+        '<div class="page-toolbar"><h3>' + escHtml(heading) + ' — Homepage</h3>' +
         '<button type="button" class="btn-sm" id="refreshHomeProducts">↻ Refresh</button></div>' +
-        '<p class="small muted">Choose Main Categories or Subcategories. A parent includes products from all its nested subcategories. Products must exist in Supabase to appear on the homepage.</p>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:18px;align-items:start">' +
+        '<p class="small muted">First choose categories. Then select individual product pictures. Your storefront shows only the exact products and order you publish.</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:18px;align-items:start">' +
         '<section class="card"><div class="card__body" style="padding:20px">' +
-        '<h3 style="margin:0 0 15px;font-size:16px">Select Categories</h3>' +
-        '<div id="homeSectionCategories" style="display:grid;gap:10px;max-height:430px;overflow:auto;padding:4px">' +
+        '<h3 style="margin:0 0 15px;font-size:16px">1. Select Categories</h3>' +
+        '<div id="homeSectionCategories" style="display:grid;gap:9px;max-height:340px;overflow:auto;padding:4px">' +
         tree.map(function (entry) {
           var c = entry.category;
           var count = products.filter(function (p) { return belongsTo(c.slug, p.cat); }).length;
           return '<label style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid #e4eadf;border-radius:8px;cursor:pointer;margin-left:' + Math.min(entry.depth,8)*12 + 'px">' +
-            '<input type="checkbox" data-home-category="' + escHtml(c.slug) + '" ' + (selected.indexOf(c.slug) >= 0 ? 'checked' : '') + ' style="width:17px;height:17px;accent-color:#1b7139">' +
+            '<input type="checkbox" data-home-category="' + escHtml(c.slug) + '" ' + (selectedCategories.indexOf(c.slug) >= 0 ? 'checked' : '') + ' style="width:17px;height:17px;accent-color:#1b7139">' +
             '<span style="flex:1">' + (entry.depth ? '↳ ' : '') + escHtml(c.name) + '</span>' +
             '<small style="color:#849085">' + count + '</small></label>';
         }).join('') + '</div>' +
-        '<p class="small muted" style="margin:14px 0">Select multiple categories; duplicate products are shown only once.</p>' +
-        '<label for="homeSectionLimit" style="display:block;margin-bottom:6px">Maximum Product Cards</label>' +
-        '<select id="homeSectionLimit" class="form-control" style="max-width:200px">' +
-        [4,8,12,16,24].map(function (x) { return '<option value="' + x + '"' + (limit === x ? ' selected' : '') + '>' + x + ' Products</option>'; }).join('') +
-        '</select><div style="margin-top:20px"><button type="button" id="saveHomeProducts" class="btn-sm btn-sm--primary">Save &amp; Publish</button></div>' +
-        '<p id="homeSectionStatus" role="status" class="small" style="margin-top:12px"></p>' +
+        '<p class="small muted" style="margin:12px 0">Parent Category includes nested Subcategory products.</p>' +
+        '<h3 style="font-size:16px;margin:22px 0 9px">2. Save Selected Products</h3>' +
+        '<p class="small muted" id="homeSelectionHelp">' + (featured ? 'Featured Products: select exactly 4 cards.' : 'Best Selling: select as many cards as required (up to 200).') + '</p>' +
+        '<button type="button" id="saveHomeProducts" class="btn-sm btn-sm--primary">Save &amp; Publish</button>' +
+        '<p id="homeSectionStatus" role="status" class="small" style="margin:10px 0"></p>' +
+        '<section id="homeChosenPanel" style="margin-top:14px;background:#eaf6e5;border:1px solid #c8e2bf;border-radius:12px;padding:14px">' +
+        '<h3 style="font-size:15px;margin:0 0 8px">Selected Product List <small id="homeSavedCount" style="font-weight:normal"></small></h3>' +
+        '<p class="small muted" id="homePublicationState"></p>' +
+        '<div id="homeChosenProducts" style="display:grid;gap:8px"></div></section>' +
         '</div></section>' +
-        '<section class="card"><div class="card__body" style="padding:20px"><h3 style="margin:0 0 12px;font-size:16px">Homepage Preview</h3>' +
-        '<p id="homeProductCount" class="small muted"></p><div id="homeProductPreview" style="display:grid;gap:8px"></div>' +
-        '<p class="small muted" style="margin-top:14px">This is a preview of product names. The existing storefront product cards and layout remain unchanged.</p>' +
+        '<section class="card"><div class="card__body" style="padding:20px">' +
+        '<h3 style="font-size:16px;margin:0 0 8px">3. Choose Individual Products (With Images)</h3>' +
+        '<p class="small muted" id="homeProductCount"></p>' +
+        '<div id="homeProductChoiceGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:12px;max-height:540px;overflow:auto"></div>' +
+        '<h3 style="font-size:16px;margin:22px 0 8px">Homepage Preview</h3>' +
+        '<p class="small muted">Only the selected cards below will appear on the homepage after publishing.</p>' +
+        '<div id="homeProductPreview" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:10px"></div>' +
         '</div></section></div>';
-      function refreshPreview() {
-        selected = $$('[data-home-category]', content).filter(function (el) { return el.checked; })
-          .map(function (el) { return el.getAttribute('data-home-category'); });
-        limit = Number($('#homeSectionLimit').value) || 4;
-        var allMatches = includedProducts();
-        $('#homeProductCount').textContent = selected.length + ' selected categories • ' + allMatches.length + ' matching products • showing up to ' + limit;
-        $('#homeProductPreview').innerHTML = allMatches.length ? allMatches.slice(0, limit).map(function (p) {
-          return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #ebeee6;border-radius:8px">' +
-            '<div style="flex:1"><b>' + escHtml(p.name) + '</b><div class="small muted">' + escHtml((catsBySlug[p.cat] || {}).name || p.cat) + '</div></div></div>';
-        }).join('') : '<p class="small muted">No products in the selected categories yet.</p>';
+      function paint() {
+        // Keep selection tied to currently eligible products. Do not alter the
+        // published homepage until the user explicitly saves.
+        var matches = matchingProducts(), eligible = {};
+        matches.forEach(function (p) { eligible[p.slug] = true; });
+        selectedProductSlugs = selectedProductSlugs.filter(function (slug) { return !!eligible[slug]; });
+        var selected = selectedProducts();
+        $('#homeProductCount').textContent = selectedCategories.length + ' categories • ' + matches.length +
+          ' available products • ' + selected.length + ' selected' + (featured ? ' / 4' : '');
+        $('#homeProductChoiceGrid').innerHTML = matches.length ? matches.map(function (p) {
+          var checked = selectedProductSlugs.indexOf(p.slug) >= 0;
+          return '<label style="display:block;border:2px solid ' + (checked ? '#16723a' : '#e5e9df') + ';background:' + (checked ? '#f0f9ed' : '#fff') + ';border-radius:12px;padding:10px;cursor:pointer">' +
+            '<span style="display:flex;gap:8px;align-items:center;justify-content:space-between">' +
+            '<input type="checkbox" data-home-product="' + escHtml(p.slug) + '" ' + (checked ? 'checked' : '') + ' style="width:18px;height:18px;accent-color:#16723a">' +
+            '<span style="font-size:11px;color:#16723a">' + (checked ? 'Selected ✓' : 'Select') + '</span></span>' +
+            '<div style="display:flex;justify-content:center;margin:8px 0">' + productPicture(p) + '</div>' +
+            '<b style="display:block;font-size:13px">' + escHtml(p.name) + '</b>' +
+            '<small style="display:block;color:#567d5c">' + categoryLabel(p) + '</small>' +
+            '<span style="display:block;font-weight:600;margin-top:5px">' + priceLabel(p) + '</span></label>';
+        }).join('') : '<p class="small muted" role="status">Select a category with products to see images.</p>';
+        $('#homeProductPreview').innerHTML = selected.length ? selected.map(function (p, idx) {
+          return '<article style="text-align:center;background:#fff;border:1px solid #e5e9df;border-radius:10px;padding:10px">' +
+            '<small style="display:block;color:#567d5c;margin-bottom:6px">' + (idx+1) + '</small>' +
+            productPicture(p) + '<b style="display:block;margin-top:6px;font-size:12px">' + escHtml(p.name) + '</b>' +
+            '<span style="display:block;font-size:12px">' + priceLabel(p) + '</span></article>';
+        }).join('') : '<p class="small muted">No products selected yet.</p>';
+        $('#homeSavedCount').textContent = '(' + selected.length + (featured ? '/4' : '') + ')';
+        $('#homePublicationState').textContent = snapshot() === publishedSnapshot ?
+          'Published selection (saved in Supabase).' : 'Draft selection — click Save & Publish to update the live homepage.';
+        $('#homeChosenProducts').innerHTML = selected.length ? selected.map(function (p, idx) {
+          return '<div style="display:flex;align-items:center;gap:10px;border:1px solid #d3e3cb;border-radius:9px;padding:8px;background:#fff">' +
+            productPicture(p) + '<div style="flex:1;min-width:0"><b style="font-size:13px">' + (idx+1) + '. ' + escHtml(p.name) + '</b>' +
+            '<div class="small muted">' + categoryLabel(p) + ' • ' + priceLabel(p) + '</div></div>' +
+            '<div style="display:flex;gap:3px;flex-wrap:wrap;justify-content:end">' +
+            '<button type="button" class="btn-sm" data-home-move="up" data-home-slug="' + escHtml(p.slug) + '" ' + (idx===0?'disabled':'') + ' aria-label="Move ' + escHtml(p.name) + ' up">↑</button>' +
+            '<button type="button" class="btn-sm" data-home-move="down" data-home-slug="' + escHtml(p.slug) + '" ' + (idx===selected.length-1?'disabled':'') + ' aria-label="Move ' + escHtml(p.name) + ' down">↓</button>' +
+            '<button type="button" class="btn-sm" data-home-remove="' + escHtml(p.slug) + '" aria-label="Remove ' + escHtml(p.name) + '">✕</button></div></div>';
+        }).join('') : '<p class="small muted">Selected Products will appear here with their images, names and prices.</p>';
       }
-      $$('[data-home-category]', content).forEach(function (el) { el.addEventListener('change', refreshPreview); });
-      $('#homeSectionLimit').addEventListener('change', refreshPreview);
+      $('#homeSectionCategories').addEventListener('change', function (ev) {
+        if (!ev.target.matches('[data-home-category]')) return;
+        selectedCategories = $$('[data-home-category]', content).filter(function (el) { return el.checked; })
+          .map(function (el) { return el.getAttribute('data-home-category'); });
+        $('#homeSectionStatus').textContent = '';
+        paint();
+      });
+      $('#homeProductChoiceGrid').addEventListener('change', function (ev) {
+        if (!ev.target.matches('[data-home-product]')) return;
+        var slug = ev.target.getAttribute('data-home-product');
+        if (ev.target.checked) {
+          if (featured && selectedProductSlugs.length >= 4) {
+            toast('Featured Products: select exactly 4. Remove a product before choosing another.', 'warn');
+            ev.target.checked = false; return;
+          }
+          if (selectedProductSlugs.length >= 200) {
+            toast('Maximum 200 Best Selling products are supported.', 'warn');
+            ev.target.checked = false; return;
+          }
+          if (selectedProductSlugs.indexOf(slug) < 0) selectedProductSlugs.push(slug);
+        } else selectedProductSlugs = selectedProductSlugs.filter(function (s) { return s !== slug; });
+        $('#homeSectionStatus').textContent = '';
+        paint();
+      });
+      $('#homeChosenProducts').addEventListener('click', function (ev) {
+        var button = ev.target.closest('button');
+        if (!button) return;
+        if (button.hasAttribute('data-home-remove')) {
+          selectedProductSlugs = selectedProductSlugs.filter(function (s) { return s !== button.getAttribute('data-home-remove'); });
+        } else if (button.hasAttribute('data-home-move')) {
+          var idx = selectedProductSlugs.indexOf(button.getAttribute('data-home-slug'));
+          var other = idx + (button.getAttribute('data-home-move') === 'up' ? -1 : 1);
+          if (idx >= 0 && other >= 0 && other < selectedProductSlugs.length) {
+            var temp = selectedProductSlugs[idx];
+            selectedProductSlugs[idx] = selectedProductSlugs[other]; selectedProductSlugs[other] = temp;
+          }
+        }
+        $('#homeSectionStatus').textContent = '';
+        paint();
+      });
       $('#refreshHomeProducts').addEventListener('click', function () { renderHomeProductSection(sectionKey); });
       $('#saveHomeProducts').addEventListener('click', function () {
-        if (!selected.length) { toast('Please select at least one category.', 'warn'); return; }
-        var btn = $('#saveHomeProducts');
-        var status = $('#homeSectionStatus');
-        btn.disabled = true; btn.textContent = 'Publishing…';
-        status.textContent = '';
-        demoAdminRequest('admin-homepage-sections', {
-          action: 'save', section_key: sectionKey, category_slugs: selected, product_limit: limit
-        }).then(function (response) {
-          if (!response.saved) throw new Error('Save not confirmed by Supabase');
-          status.textContent = 'Saved to Supabase. Refresh the storefront homepage to view the published products.';
+        if (!selectedCategories.length) { toast('Select at least one category.', 'warn'); return; }
+        if (featured && selectedProductSlugs.length !== 4) {
+          toast('Please choose exactly 4 Featured Products.', 'warn'); return;
+        }
+        if (!featured && !selectedProductSlugs.length) {
+          toast('Please choose at least one Best Selling product.', 'warn'); return;
+        }
+        var btn = $('#saveHomeProducts'), status = $('#homeSectionStatus');
+        var payload = { action:'save', section_key:sectionKey,
+          category_slugs:selectedCategories.slice(), product_slugs:selectedProductSlugs.slice() };
+        btn.disabled = true; btn.textContent = 'Publishing…'; status.textContent = '';
+        demoAdminRequest('admin-homepage-sections', payload).then(function (response) {
+          if (!response.saved || !response.section ||
+              JSON.stringify(response.section.product_slugs) !== JSON.stringify(payload.product_slugs))
+            throw new Error('Supabase did not confirm saved product selection.');
+          publishedSlugs = payload.product_slugs.slice();
+          publishedSnapshot = snapshot();
+          status.textContent = 'Published ' + publishedSlugs.length + ' selected product cards to Supabase. Refresh your storefront homepage.';
           toast(heading + ' saved and published');
-        }).catch(function (err) {
-          status.textContent = 'Save failed: ' + (err.message || String(err));
+          paint();
+        }).catch(function (error) {
+          status.textContent = 'Save failed: ' + (error.message || String(error));
           toast(status.textContent, 'error');
         }).finally(function () { btn.disabled = false; btn.textContent = 'Save & Publish'; });
       });
-      refreshPreview();
+      paint();
     }).catch(function (err) {
       if (myId !== homeSectionLoadId || pageTitle.textContent !== heading) return;
       content.innerHTML = '<div role="alert" style="padding:18px;border:1px solid #f0b2a5;background:#fff2ef;border-radius:10px">' +
         '<h3>Could not load homepage settings</h3><p>' + escHtml(err.message || String(err)) + '</p>' +
-        '<p>Run the new homepage SQL migration and deploy the approved-admin Edge Function first.</p>' +
+        '<p>Run the v17 homepage product picks SQL migration and deploy the approved-admin Edge Function first.</p>' +
         '<button class="btn-sm" id="retryHomeProducts">Retry</button></div>';
       $('#retryHomeProducts').addEventListener('click', function () { renderHomeProductSection(sectionKey); });
     });
