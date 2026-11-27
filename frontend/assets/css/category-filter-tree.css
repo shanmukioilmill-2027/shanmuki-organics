@@ -1,0 +1,28 @@
+/* Shanmuki Organics product-category accordion, scoped to the filter only.
+   Main category stays in its existing place; nested subcategories are hidden
+   until the shopper expands that parent. Does not modify product-card styles. */
+[data-f-cats].cat-tree { display: block; }
+.cat-tree__group { width: 100%; }
+.cat-tree__parent { display: flex; align-items: center; min-height: 38px; gap: 9px; padding: 4px 0; }
+.cat-tree__parent-check { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 14px; cursor: pointer; }
+.cat-tree__parent-check input { width: 14px; height: 14px; accent-color: var(--green-700); cursor: pointer; margin: 0; }
+.cat-tree__toggle { display: flex; flex: 1; min-width: 0; gap: 7px; align-items: center; border: 0; padding: 4px 0; background: transparent; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 12.5px; line-height: 1.5; }
+.cat-tree__title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cat-tree__title .ta { display: block; font-size: 10px; color: var(--tamil); }
+.cat-tree__toggle small, .cat-tree__item small { flex: none; color: var(--muted-2); font-size: 11px; }
+.cat-tree__toggle:hover .cat-tree__title, .cat-tree__item:hover .cat-tree__title { color: var(--green-700); }
+.cat-tree__chevron { flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; transition: transform .18s ease; color: var(--green-700); }
+.cat-tree__chevron svg { width: 14px; height: 14px; }
+.cat-tree__toggle[aria-expanded="true"] .cat-tree__chevron { transform: rotate(180deg); }
+.cat-tree__children { margin: 0 0 4px 7px; padding-left: 13px; border-left: 1px solid var(--line-2); }
+.cat-tree__children[hidden] { display: none !important; }
+.cat-tree__item { margin: 0; }
+.cat-tree__child { padding: 5px 0; }
+.cat-tree__child .cat-tree__title { position: relative; }
+.cat-tree__child .cat-tree__title::before { content: "↳"; margin-right: 5px; color: var(--green-700); }
+.cat-tree__toggle:focus-visible, .cat-tree__parent-check input:focus-visible, .cat-tree__item input:focus-visible { outline: 2px solid var(--green-700); outline-offset: 3px; border-radius: 3px; }
+html.lang-en .cat-tree__toggle .ta { display: none; }
+html.lang-ta .cat-tree__toggle .cat-tree__en { display: none; }
+html.lang-ta .cat-tree__toggle .ta { font-size: 12.5px; color: inherit; font-family: var(--font-ta); }
+/* Keep nested checkbox labels legible when switching languages. */
+html.lang-en .cat-tree__child .ta, html.lang-en .cat-tree__standalone .ta { display: none; }
