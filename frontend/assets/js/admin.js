@@ -2257,7 +2257,7 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Fixed Round Circle: drag, resize, and move only the PHOTO inside the circle. The white circle never changes size. One image, no blur, no inner circle. What you set here is used on the storefront after Apply Alignment and Save.</p>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Photo Size Sync v7: The outer category circle remains fixed. Move or resize only the uploaded photo; at 80% the storefront uses the same 80% photo size. One original image, no blurred copy. Apply Alignment, then Save.</p>' +
           '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Fixed storefront circle — move the image inside</div>' +
           '<div data-cat-align-stage style="background:#fff;border:0;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative;box-shadow:0 0 0 1px #d7e2d4"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:cover;border-radius:0;display:block;pointer-events:none;transform-origin:center center"></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
@@ -2285,7 +2285,12 @@
         layer.querySelector('[data-cat-align-x-label]').textContent = alignment.x + '%';
         layer.querySelector('[data-cat-align-y-label]').textContent = alignment.y + '%';
       }
-      function close() { document.removeEventListener('keydown', onEscape); layer.remove(); }
+      var categoryPreviewResizeObserver = null;
+      function close() {
+        if (categoryPreviewResizeObserver) categoryPreviewResizeObserver.disconnect();
+        document.removeEventListener('keydown', onEscape);
+        layer.remove();
+      }
       function onEscape(event) { if (event.key === 'Escape') { event.stopImmediatePropagation(); close(); } }
       document.addEventListener('keydown', onEscape, true);
       layer.addEventListener('click', function (event) {
@@ -2302,6 +2307,10 @@
         }
       });
       image.addEventListener('load', paint);
+      if (typeof ResizeObserver === 'function') {
+        categoryPreviewResizeObserver = new ResizeObserver(paint);
+        categoryPreviewResizeObserver.observe(stage);
+      }
       s.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:s.value,x:alignment.x,y:alignment.y}); paint(); });
       x.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:x.value,y:alignment.y}); paint(); });
       y.addEventListener('input', function () { alignment = safeCategoryAlignment({scale:alignment.scale,x:alignment.x,y:y.value}); paint(); });

@@ -664,55 +664,60 @@
     };
   }
 
-  /* Category image renderer — a FIXED circular mask and one movable photo.
-   * Previously the image itself received border-radius:50% and was shrunk,
-   * which made it look as if a second, smaller circle were being resized.
-   * Now ONLY the photo changes zoom/position. The host/circle never changes.
-   * Use the same helper in admin popup, admin thumbnail and storefront.
-   * No blurred duplicate, no new database fields, source image untouched. */
+  /* CATEGORY PHOTO ONLY — MATCHED ADMIN / STOREFRONT RENDERER (v7)
+   * IMPORTANT: The OUTER circular frame is fixed. A single uploaded photo is
+   * sized / positioned inside it. The same math is executed on both pages.
+   * Previous v6 converted 80% into a >100% full-cover image, making the
+   * storefront crop bottle caps even when the Admin editor showed it small.
+   * Here 80% means exactly 80% of the normal (90%-diameter) photo size.
+   * No duplicate blurred photo, no permanent crop, no database changes.
+   */
   function fitCategoryImage(img, alignment, circle) {
     if (!img || !img.parentElement || !img.naturalWidth || !img.naturalHeight) return;
     var host = img.parentElement;
     var frameW = host.clientWidth, frameH = host.clientHeight;
     if (frameW < 1 || frameH < 1) return;
     var a = categoryAlignment(alignment);
-    var ambience = host.querySelector('[data-category-ambient]');
-    if (ambience) ambience.remove();
+    var ambient = host.querySelector('[data-category-ambient]');
+    if (ambient) ambient.remove();
     host.style.position = 'relative';
+    host.style.overflow = 'hidden';
+    host.style.background = '#fff';
     if (circle) {
-      // The *outer* circle is a fixed stencil, regardless of Image Size.
-      // The photo is always large enough to cover it, so there cannot be an
-      // inner shrinking circle, rectangular/square corners or white gaps.
-      var diameter = Math.min(frameW, frameH);
-      var cover = Math.max(diameter / img.naturalWidth, diameter / img.naturalHeight);
-      // Whole slider range stays responsive, without zooming the frame.
-      // 50% = minimum full-cover photo; 160% = enlarged/cropped photo.
-      var photoZoom = 1 + ((a.scale - 50) / 110) * 0.58;
-      var photoW = img.naturalWidth * cover * photoZoom;
-      var photoH = img.naturalHeight * cover * photoZoom;
-      var freeX = Math.max(0, photoW - frameW);
-      var freeY = Math.max(0, photoH - frameH);
-      // Offsets are fractions of the *available photo movement*, never
-      // movement of the frame itself; clamp so no outer gaps are exposed.
-      var left = -freeX / 2 + (a.x / 50) * freeX / 2;
-      var top = -freeY / 2 + (a.y / 50) * freeY / 2;
-      host.style.overflow = 'hidden';
+      // CSS .catcard__img has 5px padding; disable it only for uploaded
+      // category photos so the exact same diameter is used in the Admin editor.
+      host.style.padding = '0';
       host.style.borderRadius = '50%';
-      host.style.backgroundColor = '#fff';
+      host.style.transform = 'none'; // category-card hover must not move its circle
+      var diameter = Math.min(frameW, frameH);
+      var imageSize = diameter * 0.90 * (a.scale / 100);
+      // Movement is applied to the PHOTO, not to its enclosing frame.
+      // Keep the complete smaller photo inside the big circle when possible.
+      var maxMove = Math.abs(diameter - imageSize) / 2;
+      var offX = maxMove * a.x / 50;
+      var offY = maxMove * a.y / 50;
+      if (imageSize <= diameter) {
+        var distance = Math.hypot(offX, offY);
+        if (distance > maxMove && distance > 0) {
+          offX *= maxMove / distance;
+          offY *= maxMove / distance;
+        }
+      }
       img.style.position = 'absolute';
-      img.style.display = 'block';
-      img.style.width = photoW + 'px';
-      img.style.height = photoH + 'px';
-      img.style.left = ((frameW - diameter) / 2 + left) + 'px';
-      img.style.top = ((frameH - diameter) / 2 + top) + 'px';
-      img.style.objectFit = 'fill'; // element keeps the original aspect ratio
-      img.style.borderRadius = '0'; // NEVER round the photo; round the fixed host
+      img.style.width = imageSize + 'px';
+      img.style.height = imageSize + 'px';
+      img.style.left = ((frameW - imageSize) / 2 + offX) + 'px';
+      img.style.top = ((frameH - imageSize) / 2 + offY) + 'px';
+      // A round PHOTO inside the unchanged circular frame prevents square
+      // photo corners at smaller zoom levels (white space is unavoidable).
+      img.style.objectFit = 'cover';
+      img.style.borderRadius = '50%';
     } else {
-      // Other, non-circular category layouts stay unchanged.
-      var nw = img.naturalWidth, nh = img.naturalHeight;
-      var safeFit = Math.min(frameW * .96 / nw, frameH * .96 / nh);
-      var safeSize = .55 + (a.scale - 50) * .45 / 110;
-      var w = nw * safeFit * safeSize, h = nh * safeFit * safeSize;
+      // Non-circle tiles remain as before, without destructive cropping.
+      var iw = img.naturalWidth, ih = img.naturalHeight;
+      var base = Math.min(frameW * .96 / iw, frameH * .96 / ih);
+      var mult = .55 + (a.scale - 50) * .45 / 110;
+      var w = iw * base * mult, h = ih * base * mult;
       img.style.position = 'absolute';
       img.style.width = w + 'px';
       img.style.height = h + 'px';
@@ -721,10 +726,11 @@
       img.style.objectFit = 'contain';
       img.style.borderRadius = '0';
     }
-    // Eliminate visual effects inherited from older preview releases.
+    // Clear legacy CSS transforms / mask / sizing that may override the editor.
+    img.style.display = 'block';
+    img.style.boxSizing = 'border-box';
     img.style.webkitMaskImage = 'none';
     img.style.maskImage = 'none';
-    img.style.zIndex = '1';
     img.style.maxWidth = 'none';
     img.style.maxHeight = 'none';
     img.style.transform = 'none';
@@ -734,7 +740,10 @@
     img.style.margin = '0';
     img.style.background = 'transparent';
     img.style.filter = 'none';
+    img.style.zIndex = '1';
+    img.dataset.categoryPhotoRenderer = 'v7';
   }
+  window.SITE.categoryPhotoRendererVersion = 'v7-matched-20261127';
   window.SITE.fitCategoryImage = fitCategoryImage;
   window.SITE.categoryImageTransform = categoryImageTransform;
   window.SITE.loadCatalog = function () {
