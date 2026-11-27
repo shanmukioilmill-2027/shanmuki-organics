@@ -5217,6 +5217,97 @@ html.lang-ta .pgrid .pcard.pcard--ref .pcard__nm { display: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Full-width collection banners below Featured Products.
+   Uses the same width and horizontal gutters as the hero at every viewport. */
+.admin-banner-below-featured[hidden] { display: none !important; }
+.admin-banner-below-featured { padding-top: 24px; padding-bottom: 24px; }
+.below-featured-slider {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-l);
+  background: #f5f2e8;
+  box-shadow: var(--shadow-s);
+}
+.below-featured-slider__track {
+  display: flex;
+  height: 480px;
+  width: 100%;
+  transition: transform .6s ease;
+  will-change: transform;
+}
+.below-featured-slider__slide {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+}
+.below-featured-slider__slide img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.below-featured-slider__arrow {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.55);
+  background: rgba(0,0,0,.38);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.below-featured-slider__arrow[hidden], .below-featured-slider__dots[hidden] { display: none !important; }
+.below-featured-slider__arrow--prev { left: 16px; }
+.below-featured-slider__arrow--next { right: 16px; }
+.below-featured-slider__arrow:focus-visible,
+.below-featured-slider__dot:focus-visible { outline: 3px solid #ffb748; outline-offset: 2px; }
+.below-featured-slider__dots {
+  position: absolute;
+  bottom: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+.below-featured-slider__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,.2);
+  background: rgba(255,255,255,.7);
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  padding: 0;
+  cursor: pointer;
+}
+.below-featured-slider__dot.is-active { width: 25px; border-radius: 9px; background: #17653b; }
+@media (max-width: 540px) {
+  .admin-banner-below-featured { padding-block: 12px; }
+  .below-featured-slider { border-radius: 11px; }
+  .below-featured-slider__track { height: 350px; }
+  .below-featured-slider__arrow { width: 30px; height: 30px; font-size: 16px; }
+  .below-featured-slider__arrow--prev { left: 5px; }
+  .below-featured-slider__arrow--next { right: 5px; }
+  .below-featured-slider__dots { bottom: 12px; gap: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .below-featured-slider__track { transition: none; }
+}
+
 /* Read-only public placements for approved-admin Supabase banners. */
 .promos .admin-banner-promo { min-height: 170px; padding: 0; display: flex; align-items: end; }
 .admin-banner-promo__image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

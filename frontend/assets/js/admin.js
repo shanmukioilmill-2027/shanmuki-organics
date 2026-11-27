@@ -3580,7 +3580,7 @@
       '<select id="bPosition" class="field-input">' +
       '<option value="hero"' + (b.position === 'hero' ? ' selected' : '') + '>Hero Slider</option>' +
       '<option value="promo"' + (b.position === 'promo' ? ' selected' : '') + '>Promo Bar</option>' +
-      '<option value="sidebar"' + (b.position === 'sidebar' ? ' selected' : '') + '>Sidebar</option>' +
+      '<option value="sidebar"' + (b.position === 'sidebar' ? ' selected' : '') + '>Below Featured — Full Width Slider</option>' +
       '</select>' +
       '</div>' +
       /* Order */
@@ -3605,7 +3605,7 @@
       '<div id="bImgDropzone" class="img-dropzone"' + (b.image ? ' style="display:none"' : '') + '>' +
       '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#92a096" stroke-width="1.5" style="margin-bottom:6px"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
       '<p style="margin:0;font-size:14px;font-weight:600;color:#4a5548">Click to upload or drag & drop</p>' +
-      '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · Recommended 1600×800px</p>' +
+      '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · Full-width banners: 1600×640px. Keep important details centered for mobile.</p>' +
       '</div>' +
       '<div id="bImgPreview" class="img-preview"' + (!b.image ? ' style="display:none"' : '') + '>' +
       '<img id="bImgThumb" src="' + escHtml(b.image || '') + '" style="max-height:140px;border-radius:8px;object-fit:cover">' +
@@ -3745,7 +3745,11 @@
       '<button class="btn-sm" id="importBrowserBanners" title="One-time import of browser-only Paused/Active changes">Import existing browser banners</button>' +
       '<button class="btn-sm" id="refreshBanners">↻ Refresh</button>' +
       '<button class="btn-sm btn-sm--primary" id="addBannerBtn">+ Add Banner</button></div></div>' +
-      '<p class="small muted">Live source: Supabase. Old browser-only Pause and image changes are NOT published until you click "Import existing browser banners" once. Refresh this list to verify what is live.</p>' +
+      '<div style="padding:15px 18px;margin:12px 0 18px;background:#f1f7eb;border:1px solid #c9dbc3;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
+      '<div><strong style="display:block;color:#135b32">Below Featured · Full-width Image Slider</strong>' +
+      '<span class="small muted">' + banners.filter(function (b) { return b.position === 'sidebar'; }).length + '/5 images · Below Featured Products on desktop and mobile. Images play in Display Order.</span></div>' +
+      '<button type="button" class="btn-sm btn-sm--primary" id="addBelowFeaturedBanner">+ Add Image</button></div>' +
+      '<p class="small muted">Live source: Supabase. Edit/Pause/Delete each image below. Old browser-only Pause and image changes are NOT published until you click "Import existing browser banners" once.</p>' +
       '<div class="product-grid">' + banners.map(function (b, idx) {
         var uid = String(idx);
         return '<div class="product-admin-card">' +
@@ -3784,10 +3788,33 @@
       }).finally(function () { if (btn.isConnected) btn.disabled = false; });
     });
 
+    $('#addBelowFeaturedBanner').addEventListener('click', function () {
+      var existing = banners.filter(function (b) { return b.position === 'sidebar'; });
+      if (existing.length >= 5) {
+        toast('Maximum 5 images. Edit or delete an existing Below Featured image first.', 'warn');
+        return;
+      }
+      var nextOrder = Math.max.apply(null, [0].concat(existing.map(function (b) { return b.order; }))) + 1;
+      var modal = openModal('Add Below Featured Image (' + (existing.length + 1) + '/5)',
+        getBannerFormHTML({ position: 'sidebar', order: nextOrder }), function (m) {
+          var banner = readBannerForm(m);
+          if (!banner) return false;
+          if (banner.position === 'sidebar' && existing.length >= 5) {
+            toast('Only 5 Below Featured images are allowed.', 'warn'); return false;
+          }
+          banner.id = 'bf' + Date.now();
+          return bannerSaveFromModal(m, banner, 'New image added to the homepage slider.');
+        });
+      initBannerImgUpload(modal);
+    });
+
     $('#addBannerBtn').addEventListener('click', function () {
       var modal = openModal('Add New Banner', getBannerFormHTML(), function (m) {
         var banner = readBannerForm(m);
         if (!banner) return false;
+        if (banner.position === 'sidebar' && banners.filter(function (b) { return b.position === 'sidebar'; }).length >= 5) {
+          toast('Maximum 5 Below Featured images. Edit or delete an existing image first.', 'warn'); return false;
+        }
         banner.id = 'b' + Date.now();
         return bannerSaveFromModal(m, banner, 'Banner published to Supabase.');
       });
@@ -3801,6 +3828,10 @@
         var modal = openModal('Edit Banner', getBannerFormHTML(old), function (m) {
           var updated = readBannerForm(m);
           if (!updated) return false;
+          if (updated.position === 'sidebar' && old.position !== 'sidebar' &&
+            banners.filter(function (b) { return b.position === 'sidebar'; }).length >= 5) {
+            toast('Maximum 5 Below Featured images. Edit or delete an existing image first.', 'warn'); return false;
+          }
           updated.id = old.id;
           return bannerSaveFromModal(m, updated, 'Banner updated in Supabase.');
         });

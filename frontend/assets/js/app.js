@@ -1050,13 +1050,89 @@
     var promoGrid = document.querySelector('.container.promos');
     var promoSection = promoGrid && promoGrid.closest('section');
     if (promoSection) promoSection.style.visibility = 'hidden';
+    // The Sidebar placement is retained in Supabase for backward compatibility.
+    // Visually it is now the full-width carousel below Featured Products.
     var sidebarZone = document.getElementById('adminBannerSidebar');
-    if (!sidebarZone && promoSection) {
-      sidebarZone = document.createElement('section');
-      sidebarZone.id = 'adminBannerSidebar';
-      sidebarZone.className = 'sec sec--tight admin-banner-sidebar-section';
-      sidebarZone.hidden = true;
-      promoSection.insertAdjacentElement('afterend', sidebarZone);
+    var belowTrack = sidebarZone && sidebarZone.querySelector('[data-below-track]');
+    var belowDots = sidebarZone && sidebarZone.querySelector('[data-below-dots]');
+    var belowPrevious = sidebarZone && sidebarZone.querySelector('[data-below-prev]');
+    var belowNext = sidebarZone && sidebarZone.querySelector('[data-below-next]');
+    var belowIndex = 0;
+    var belowCount = 0;
+    var belowTimer = null;
+    var belowSignature = null;
+    var belowHover = false;
+    var belowDelay = 5500;
+
+    function stopBelowAutoplay() { if (belowTimer !== null) { clearInterval(belowTimer); belowTimer = null; } }
+    function startBelowAutoplay() {
+      stopBelowAutoplay();
+      if (belowCount > 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        belowTimer = setInterval(function () {
+          if (!belowHover && !document.hidden) moveBelow(1);
+        }, belowDelay);
+      }
+    }
+    function moveBelow(delta, absolute) {
+      if (!belowCount || !belowTrack) return;
+      belowIndex = ((absolute ? delta : belowIndex + delta) % belowCount + belowCount) % belowCount;
+      belowTrack.style.transform = 'translateX(-' + belowIndex * 100 + '%)';
+      if (belowDots) Array.prototype.forEach.call(belowDots.children, function (dot, index) {
+        dot.classList.toggle('is-active', index === belowIndex);
+        dot.setAttribute('aria-current', index === belowIndex ? 'true' : 'false');
+      });
+    }
+    function renderBelowFeatured(banners) {
+      if (!sidebarZone || !belowTrack || !belowDots) return;
+      var signature = banners.map(function (b) {
+        return [b.slug, b.title, b.link, b.image, b.order].join('~');
+      }).join('|');
+      if (signature === belowSignature) return; // preserve selected slide on live refresh
+      belowSignature = signature;
+      stopBelowAutoplay();
+      belowIndex = 0;
+      belowCount = banners.length;
+      sidebarZone.hidden = !belowCount;
+      belowTrack.innerHTML = banners.map(function (b, index) {
+        return '<a class="below-featured-slider__slide" href="' + esc(bannerHref(b.link)) +
+          '" aria-label="' + esc(b.title || 'View collection') + '">' +
+          '<img src="' + esc(b.image) + '" alt="' + esc(b.title || '') +
+          '" loading="' + (index ? 'lazy' : 'eager') + '"></a>';
+      }).join('');
+      belowDots.innerHTML = banners.map(function (b, index) {
+        return '<button type="button" class="below-featured-slider__dot' + (index === 0 ? ' is-active' : '') +
+          '" data-below-dot="' + index + '" aria-label="Show banner ' + (index + 1) +
+          ': ' + esc(b.title || 'Collection') + '" aria-current="' + (index === 0 ? 'true' : 'false') + '"></button>';
+      }).join('');
+      belowTrack.style.transform = 'translateX(0%)';
+      if (belowPrevious) belowPrevious.hidden = belowCount < 2;
+      if (belowNext) belowNext.hidden = belowCount < 2;
+      belowDots.hidden = belowCount < 2;
+      startBelowAutoplay();
+    }
+    if (sidebarZone) {
+      if (belowPrevious) belowPrevious.addEventListener('click', function () { moveBelow(-1); startBelowAutoplay(); });
+      if (belowNext) belowNext.addEventListener('click', function () { moveBelow(1); startBelowAutoplay(); });
+      if (belowDots) belowDots.addEventListener('click', function (event) {
+        var dot = event.target.closest('[data-below-dot]');
+        if (dot) { moveBelow(Number(dot.getAttribute('data-below-dot')), true); startBelowAutoplay(); }
+      });
+      sidebarZone.addEventListener('mouseenter', function () { belowHover = true; });
+      sidebarZone.addEventListener('mouseleave', function () { belowHover = false; });
+      sidebarZone.addEventListener('focusin', function () { belowHover = true; });
+      sidebarZone.addEventListener('focusout', function (event) {
+        if (!event.relatedTarget || !sidebarZone.contains(event.relatedTarget)) belowHover = false;
+      });
+      var belowTouchX = null;
+      sidebarZone.addEventListener('touchstart', function (event) {
+        belowTouchX = event.touches[0].clientX;
+      }, { passive: true });
+      sidebarZone.addEventListener('touchend', function (event) {
+        if (belowTouchX === null) return;
+        var distance = event.changedTouches[0].clientX - belowTouchX;
+        belowTouchX = null;
+        if (Math.abs(distance) > 45) { moveBelow(distance < 0 ? 1 : -1); startBelowAutoplay(); }
+      }, { passive: true });
     }
 
     function bannerHref(value) {
@@ -1125,15 +1201,7 @@
         }).join('');
         if (promoSection) { promoSection.style.display = promos.length ? '' : 'none'; promoSection.style.visibility = 'visible'; }
       }
-      if (sidebarZone) {
-        var right = active.filter(function (b) { return b.position === 'sidebar'; });
-        sidebarZone.hidden = !right.length;
-        sidebarZone.innerHTML = right.length ? '<div class="container admin-banner-sidebar-list">' + right.map(function (b) {
-          return '<a class="admin-banner-sidebar" href="' + esc(bannerHref(b.link)) + '">' +
-            '<img src="' + esc(b.image) + '" alt="' + esc(b.title) + '" loading="lazy">' +
-            '<strong>' + esc(b.title) + '</strong></a>';
-        }).join('') + '</div>' : '';
-      }
+      renderBelowFeatured(active.filter(function (b) { return b.position === 'sidebar'; }));
       // If all hero slides were paused, stop the timer and remove stale visuals.
       cur = 0;
       if (hero.length > 1) startAuto();
@@ -1156,7 +1224,7 @@
         root.style.visibility = 'visible';
         stopAuto();
         if (promoSection) { promoSection.style.display = 'none'; promoSection.style.visibility = 'visible'; }
-        if (sidebarZone) sidebarZone.hidden = true;
+        if (sidebarZone) { sidebarZone.hidden = true; stopBelowAutoplay(); belowSignature = null; }
       });
     }
 
