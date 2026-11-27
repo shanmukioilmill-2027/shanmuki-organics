@@ -26,3 +26,10 @@ html.lang-ta .cat-tree__toggle .cat-tree__en { display: none; }
 html.lang-ta .cat-tree__toggle .ta { font-size: 12.5px; color: inherit; font-family: var(--font-ta); }
 /* Keep nested checkbox labels legible when switching languages. */
 html.lang-en .cat-tree__child .ta, html.lang-en .cat-tree__standalone .ta { display: none; }
+
+/* Multi-level nested Subcategories (v14). Each expandable child gets the same
+   fixed row layout; indents are restrained for deep trees on narrow screens. */
+.cat-tree__children .cat-tree__group { min-width: 0; }
+.cat-tree__children .cat-tree__parent { min-width: 0; }
+.cat-tree__children .cat-tree__children { margin-left: 4px; padding-left: 8px; }
+.cat-tree__children .cat-tree__toggle { min-width: 0; }

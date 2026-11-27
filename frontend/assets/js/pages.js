@@ -8,6 +8,21 @@
   const A = window.App, SITE = window.SITE;
   const $ = A.$, $$ = A.$$, esc = A.esc, money = A.money, ic = A.ic, card = A.card, stars = A.stars;
 
+  // Match a category or any nested descendant, at any supported depth.
+  // This reads the current catalog (including Supabase category refreshes).
+  function categoryIsAncestor(ancestorSlug, categorySlug) {
+    if (!ancestorSlug || !categorySlug) return false;
+    const visited = new Set();
+    let slug = categorySlug;
+    while (slug && !visited.has(slug)) {
+      if (slug === ancestorSlug) return true;
+      visited.add(slug);
+      const category = SITE.cat(slug);
+      slug = category && category.parent_slug;
+    }
+    return false;
+  }
+
   const qs = function (k) {
     const m = new RegExp('[?&]' + k + '=([^&]*)').exec(location.search);
     return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : '';
@@ -58,10 +73,7 @@
 
       const visibleCategories = SITE.categories.filter(function (c) { return !c.parent_slug; });
       track.innerHTML = visibleCategories.map(function (c) {
-        const n = SITE.products.filter(function (p) {
-          if (p.cat === c.slug) return true;
-          return SITE.categories.some(function (child) { return child.slug === p.cat && child.parent_slug === c.slug; });
-        }).length;
+        const n = SITE.products.filter(function (p) { return categoryIsAncestor(c.slug, p.cat); }).length;
         const imgSrc = c.img ? c.img : 'assets/img/categories/' + c.slug + '.svg';
         const imgStyle = c.img ? 'width:100%;height:100%;object-fit:contain;object-position:center;transform:none;background:transparent' : '';
         const fallback = 'assets/img/categories/' + c.slug + '.svg';
@@ -252,22 +264,22 @@
     };
 
     const catbox = $('[data-f-cats]');
-    // UI-only hierarchy: categories and parent_slug are already supplied by
-    // Supabase. Do not change database records or product-category mappings.
+    // Render a true nested accordion, not a flat list of one-level children.
+    // Parent checkbox includes products in every descendant; selecting a child
+    // narrows to its branch. All data comes from the existing Supabase catalog.
     const expandedCats = new Set();
-    if (state.cats.length) {
-      const selected = SITE.cat(state.cats[0]);
-      if (selected && selected.parent_slug) expandedCats.add(selected.parent_slug);
-      else if (selected) expandedCats.add(selected.slug);
-    }
+    state.cats.forEach(function (slug) {
+      let node = SITE.cat(slug);
+      const seen = new Set();
+      while (node && !seen.has(node.slug)) {
+        seen.add(node.slug);
+        if (node.parent_slug) expandedCats.add(node.parent_slug);
+        node = node.parent_slug ? SITE.cat(node.parent_slug) : null;
+      }
+    });
 
     const productsInCategory = function (category) {
-      const childSlugs = new Set(SITE.categories.filter(function (c) {
-        return c.parent_slug === category.slug;
-      }).map(function (c) { return c.slug; }));
-      return SITE.products.filter(function (p) {
-        return p.cat === category.slug || (!category.parent_slug && childSlugs.has(p.cat));
-      }).length;
+      return SITE.products.filter(function (p) { return categoryIsAncestor(category.slug, p.cat); }).length;
     };
 
     function categoryLabel(category) {
@@ -287,32 +299,37 @@
       if (!catbox) return;
       const all = SITE.categories;
       const knownSlugs = new Set(all.map(function (category) { return category.slug; }));
-      // Keep a category visible even when its parent is missing from the DB.
       const roots = all.filter(function (c) { return !c.parent_slug || !knownSlugs.has(c.parent_slug); });
-      catbox.classList.add('cat-tree');
-      catbox.innerHTML = roots.map(function (parent, index) {
-        const children = all.filter(function (child) { return child.parent_slug === parent.slug; });
-        if (!children.length) return categoryCheckbox(parent, 'cat-tree__standalone');
-        const isOpen = expandedCats.has(parent.slug) || children.some(function (child) {
-          return state.cats.indexOf(child.slug) > -1;
-        });
-        const panelId = 'so-cat-children-' + index;
-        return '<div class="cat-tree__group" data-category-group="' + esc(parent.slug) + '">' +
+      const rendered = new Set();
+      let panelIndex = 0;
+      function renderNode(category, depth) {
+        if (rendered.has(category.slug)) return ''; // bad legacy data cannot loop
+        rendered.add(category.slug);
+        const children = all.filter(function (child) { return child.parent_slug === category.slug && !rendered.has(child.slug); });
+        if (!children.length) return categoryCheckbox(category, depth ? 'cat-tree__child' : 'cat-tree__standalone');
+        const isOpen = expandedCats.has(category.slug);
+        const panelId = 'so-cat-children-' + (++panelIndex);
+        return '<div class="cat-tree__group" data-category-group="' + esc(category.slug) + '">' +
           '<div class="cat-tree__parent">' +
-          '<label class="cat-tree__parent-check" title="Filter all products in ' + esc(parent.name) + '">' +
-          '<input type="checkbox" value="' + esc(parent.slug) + '"' +
-          (state.cats.indexOf(parent.slug) > -1 ? ' checked' : '') +
-          ' aria-label="Filter all products in ' + esc(parent.name) + '"></label>' +
-          '<button class="cat-tree__toggle" type="button" data-cat-toggle="' + esc(parent.slug) + '"' +
+          '<label class="cat-tree__parent-check" title="Filter all products in ' + esc(category.name) + '">' +
+          '<input type="checkbox" value="' + esc(category.slug) + '"' +
+          (state.cats.indexOf(category.slug) > -1 ? ' checked' : '') +
+          ' aria-label="Filter all products in ' + esc(category.name) + '"></label>' +
+          '<button class="cat-tree__toggle" type="button" data-cat-toggle="' + esc(category.slug) + '"' +
           ' aria-expanded="' + isOpen + '" aria-controls="' + panelId + '"' +
-          ' aria-label="' + (isOpen ? 'Hide' : 'Show') + ' subcategories of ' + esc(parent.name) + '">' +
-          categoryLabel(parent) + '<small>' + productsInCategory(parent) + '</small>' +
+          ' aria-label="' + (isOpen ? 'Hide' : 'Show') + ' subcategories of ' + esc(category.name) + '">' +
+          categoryLabel(category) + '<small>' + productsInCategory(category) + '</small>' +
           '<span class="cat-tree__chevron" aria-hidden="true">' + ic('chevD') + '</span></button>' +
-          '</div><div class="cat-tree__children" data-cat-panel="' + esc(parent.slug) + '" id="' + panelId + '"' +
+          '</div><div class="cat-tree__children" data-cat-panel="' + esc(category.slug) + '" id="' + panelId + '"' +
           (isOpen ? '' : ' hidden') + '>' +
-          children.map(function (child) { return categoryCheckbox(child, 'cat-tree__child'); }).join('') +
+          children.map(function (child) { return renderNode(child, depth + 1); }).join('') +
           '</div></div>';
-      }).join('');
+      }
+      catbox.classList.add('cat-tree');
+      const markup = roots.map(function (root) { return renderNode(root, 0); }).join('') +
+        all.filter(function (category) { return !rendered.has(category.slug); })
+          .map(function (orphan) { return renderNode(orphan, 0); }).join('');
+      catbox.innerHTML = markup;
     }
 
     renderCategoryTree();
@@ -341,8 +358,7 @@
       let list = SITE.products.slice();
       if (state.q) list = A.searchIndex(state.q);
       if (state.cats.length) list = list.filter(function (p) {
-        if (state.cats.indexOf(p.cat) > -1) return true;
-        return SITE.categories.some(function (child) { return child.slug === p.cat && state.cats.indexOf(child.parent_slug) > -1; });
+        return state.cats.some(function (slug) { return categoryIsAncestor(slug, p.cat); });
       });
       if (state.tag) list = list.filter(function (p) { return p.tags.indexOf(state.tag) > -1; });
       list = list.filter(function (p) { return p.price >= state.min && p.price <= state.max; });
@@ -420,24 +436,14 @@
         const t = e.target;
         if (t.closest('[data-f-cats]')) {
           if (t.type !== 'checkbox') return;
-          // A checked parent means all its children. Selecting an individual
-          // child narrows that selection rather than leaving the entire parent
-          // selected and appearing to ignore the child's checkbox.
+          // Never leave a selected ancestor and its descendant simultaneously
+          // checked: the broader parent would otherwise hide the narrower choice.
           if (t.checked) {
-            const selectedCat = SITE.cat(t.value);
-            if (selectedCat && selectedCat.parent_slug) {
-              const parentInput = $$('[data-f-cats] input[type="checkbox"]').find(function (input) {
-                return input.value === selectedCat.parent_slug;
-              });
-              if (parentInput) parentInput.checked = false;
-            } else if (selectedCat) {
-              const childSlugs = new Set(SITE.categories.filter(function (child) {
-                return child.parent_slug === selectedCat.slug;
-              }).map(function (child) { return child.slug; }));
-              $$('[data-f-cats] input[type="checkbox"]').forEach(function (input) {
-                if (childSlugs.has(input.value)) input.checked = false;
-              });
-            }
+            $$('[data-f-cats] input[type="checkbox"]').forEach(function (input) {
+              if (input === t) return;
+              if (categoryIsAncestor(input.value, t.value) || categoryIsAncestor(t.value, input.value))
+                input.checked = false;
+            });
           }
           state.cats = $$('[data-f-cats] input[type="checkbox"]:checked').map(function (i) { return i.value; });
           state.page = 1; apply(); return;

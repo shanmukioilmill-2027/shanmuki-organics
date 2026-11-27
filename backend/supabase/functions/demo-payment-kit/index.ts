@@ -434,7 +434,7 @@ Deno.serve(async req => {
       const slug = safe(incoming.slug, 90);
       const name_tamil = safe(incoming.ta, 150);
       const description = safe(incoming.blurb, 2000);
-      // Only one nesting level: children can be assigned to root categories.
+      // Any saved category may be a parent; database rejects self-links and cycles.
       const parent_slug = incoming.parent_slug == null || incoming.parent_slug === '' ? null : safe(incoming.parent_slug, 90);
       const image_url = typeof incoming.img === 'string' ? incoming.img.trim() : '';
       if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
@@ -446,7 +446,6 @@ Deno.serve(async req => {
           .select('slug, parent_slug').eq('slug', parent_slug).maybeSingle();
         if (parentError) return reply({ error: 'Could not validate Parent Category' }, 500, cors);
         if (!parent) return reply({ error: 'Selected Parent Category no longer exists' }, 400, cors);
-        if (parent.parent_slug) return reply({ error: 'Only Main Categories can contain Subcategories' }, 400, cors);
       }
       if (image_url.length > 280000 ||
           (image_url && !/^(data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+|https:\/\/[^\s]+|assets\/img\/[A-Za-z0-9_./-]+)$/.test(image_url)))
@@ -470,15 +469,9 @@ Deno.serve(async req => {
       if (originalSlug) {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(originalSlug) || slug !== originalSlug)
           return reply({ error: 'Changing existing category slugs is not supported' }, 400, cors);
-        if (parent_slug) {
-          const { count: childrenCount, error: childrenError } = await client.from('categories')
-            .select('id', { count: 'exact', head: true }).eq('parent_slug', originalSlug);
-          if (childrenError) return reply({ error: 'Could not check linked Subcategories' }, 500, cors);
-          if (childrenCount && childrenCount > 0) return reply({ error: 'Category has Subcategories; it must stay a Main Category.' }, 409, cors);
-        }
         const { data, error } = await client.from('categories').update(payload)
           .eq('slug', originalSlug).select('id, name, name_tamil, slug, parent_slug, description, icon, image_url, image_alignment, order_index').maybeSingle();
-        if (error) { console.error('[admin-categories] update', error); return reply({ error: 'Category update failed (' + error.code + ')' }, 500, cors); }
+        if (error) { console.error('[admin-categories] update', error); return reply({ error: error.code === '23514' ? 'Invalid category hierarchy: cannot assign a category under itself or its descendant.' : 'Category update failed (' + error.code + ')' }, error.code === '23514' ? 409 : 500, cors); }
         if (!data) return reply({ error: 'Category not found. Reload and try again.' }, 404, cors);
         return reply({ category: data }, 200, cors);
       }
@@ -490,7 +483,7 @@ Deno.serve(async req => {
         .insert({ ...payload, slug, order_index }).select('id, name, name_tamil, slug, parent_slug, description, icon, image_url, image_alignment, order_index').single();
       if (error) {
         console.error('[admin-categories] insert', error);
-        return reply({ error: error.code === '23505' ? 'Category slug already exists' : 'Category insert failed (' + error.code + ')' }, error.code === '23505' ? 409 : 500, cors);
+        return reply({ error: error.code === '23505' ? 'Category slug already exists' : error.code === '23514' ? 'Invalid category hierarchy (cycle).' : 'Category insert failed (' + error.code + ')' }, error.code === '23505' || error.code === '23514' ? 409 : 500, cors);
       }
       return reply({ category: data }, 201, cors);
     }
@@ -509,7 +502,7 @@ Deno.serve(async req => {
       const { count: childCount, error: childError } = await client.from('categories')
         .select('id', { count: 'exact', head: true }).eq('parent_slug', slug);
       if (childError) return reply({ error: 'Could not verify Subcategory references' }, 500, cors);
-      if (childCount && childCount > 0) return reply({ error: 'This Main Category has Subcategories. Move or delete them first.' }, 409, cors);
+      if (childCount && childCount > 0) return reply({ error: 'This Category has Subcategories. Move or delete them first.' }, 409, cors);
       const { data, error } = await client.from('categories').delete().eq('slug', slug).select('id').maybeSingle();
       if (error) { console.error('[admin-categories] delete', error); return reply({ error: 'Category delete failed (' + error.code + ')' }, 500, cors); }
       if (!data) return reply({ error: 'Category not found. Reload and try again.' }, 404, cors);

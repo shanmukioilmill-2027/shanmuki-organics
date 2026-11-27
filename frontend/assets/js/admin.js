@@ -1039,12 +1039,7 @@
   /* ============================================================ PRODUCTS */
   function getProductFormHTML(p) {
     var cats = SITE ? SITE.categories : [];
-    var orderedCats = cats.filter(function (c) { return !c.parent_slug; });
-    orderedCats = orderedCats.reduce(function (out, parent) {
-      out.push(parent);
-      cats.filter(function (c) { return c.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
-      return out;
-    }, []);
+    var orderedCats = orderedCategoryTree(cats);
     var isEdit = !!p;
     p = p || {};
     /* Image slots — dynamic (like size variants): saved images pre-filled,
@@ -1070,8 +1065,10 @@
       '<div class="form-row">' +
       '<div class="form-group"><label>Category *</label><select class="form-control" id="pCat">' +
       '<option value="">Select category</option>' +
-      orderedCats.map(function (c) {
-        return '<option value="' + escHtml(c.slug) + '"' + (p.cat === c.slug ? ' selected' : '') + '>' + (c.parent_slug ? '↳ ' : '') + escHtml(c.name) + '</option>';
+      orderedCats.map(function (entry) {
+        var c = entry.category;
+        return '<option value="' + escHtml(c.slug) + '"' + (p.cat === c.slug ? ' selected' : '') + '>' +
+          escHtml(Array(Math.min(entry.depth, 12) + 1).join('— ') + c.name) + '</option>';
       }).join('') +
       '</select></div>' +
       '<div class="form-group"><label>Rating (1-5)</label><input class="form-control" id="pRating" type="number" min="1" max="5" step="0.1" placeholder="4.5" value="' + (p.rating || '') + '"></div>' +
@@ -2046,16 +2043,13 @@
     var catCounts = {};
     allProducts.forEach(function (p) { catCounts[p.cat] = (catCounts[p.cat] || 0) + 1; });
     var catPills = '<button class="cat-pill is-active" data-cat-filter="all">All <span class="cat-pill__count">' + allProducts.length + '</span></button>';
-    var orderedCats = cats.filter(function (c) { return !c.parent_slug; }).reduce(function (out, parent) {
-      out.push(parent);
-      cats.filter(function (c) { return c.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
-      return out;
-    }, []);
-    orderedCats.forEach(function (c) {
-      var count = catCounts[c.slug] || 0;
-      if (!c.parent_slug) cats.filter(function (child) { return child.parent_slug === c.slug; }).forEach(function (child) { count += catCounts[child.slug] || 0; });
-      // Show every saved category, including empty subcategories. Main category includes its children.
-      catPills += '<button type="button" class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' + (c.parent_slug ? '↳ ' : '') + escHtml(c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
+    var orderedCats = orderedCategoryTree(cats);
+    orderedCats.forEach(function (entry) {
+      var c = entry.category;
+      var descendants = descendantsOfCategory(cats, c.slug);
+      var count = Object.keys(descendants).reduce(function (total, slug) { return total + (catCounts[slug] || 0); }, 0);
+      catPills += '<button type="button" class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' +
+        escHtml(Array(Math.min(entry.depth, 12) + 1).join('↳ ') + c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
     });
    
 
@@ -2076,8 +2070,7 @@
       if (activeCat !== 'all') list = list.filter(function (p) {
         if (activeCat === '__custom__') return p.custom;
         if (p.cat === activeCat) return true;
-        var productCat = cats.find(function (c) { return c.slug === p.cat; });
-        return !!(productCat && productCat.parent_slug === activeCat);
+        return !!descendantsOfCategory(cats, activeCat)[p.cat];
       });
       if (activeQ) list = list.filter(function (p) {
         return p.name.toLowerCase().indexOf(activeQ) > -1 || p.cat.toLowerCase().indexOf(activeQ) > -1;
@@ -2215,14 +2208,45 @@
     });
   }
 
-  // A category may be a Main Category or a one-level Subcategory.
-  // Parent choices come from the approved-admin Supabase category list, never demo seeds.
+  // Any category may have nested subcategories. Only the image/content of a
+  // category is edited by its own form; a parent is never modified implicitly.
+  // Avoid showing descendants as possible parents, preventing cycles in the UI.
+  function orderedCategoryTree(cats) {
+    var out = [], seen = Object.create(null);
+    function visit(parentSlug, depth) {
+      cats.filter(function (c) { return (c.parent_slug || '') === parentSlug; }).forEach(function (cat) {
+        if (seen[cat.slug]) return;
+        seen[cat.slug] = true;
+        out.push({ category: cat, depth: depth });
+        visit(cat.slug, depth + 1);
+      });
+    }
+    visit('', 0);
+    cats.forEach(function (c) { if (!seen[c.slug]) { seen[c.slug] = true; out.push({ category: c, depth: 0 }); visit(c.slug, 1); } });
+    return out;
+  }
+  function descendantsOfCategory(cats, slug) {
+    var seen = Object.create(null), queue = [slug];
+    seen[slug] = true;
+    for (var i = 0; i < queue.length; i++) {
+      cats.forEach(function (c) {
+        if (c.parent_slug === queue[i] && !seen[c.slug]) {
+          seen[c.slug] = true; queue.push(c.slug);
+        }
+      });
+    }
+    return seen;
+  }
+  // Parent choices come from approved-admin Supabase data, not demo seeds.
   function getCategoryFormHTML(c, cats, defaultParentSlug) {
     c = c || {};
     cats = cats || [];
     var parentSlug = c.parent_slug || defaultParentSlug || '';
-    var parentOptions = cats.filter(function (row) { return !row.parent_slug && row.slug !== c.slug; }).map(function (row) {
-      return '<option value="' + escHtml(row.slug) + '"' + (parentSlug === row.slug ? ' selected' : '') + '>' + escHtml(row.name) + '</option>';
+    var excluded = c.slug ? descendantsOfCategory(cats, c.slug) : Object.create(null);
+    var parentOptions = orderedCategoryTree(cats).filter(function (entry) { return !excluded[entry.category.slug]; }).map(function (entry) {
+      var row = entry.category;
+      return '<option value="' + escHtml(row.slug) + '"' + (parentSlug === row.slug ? ' selected' : '') + '>' +
+        escHtml(Array(Math.min(entry.depth, 12) + 1).join('— ') + row.name) + '</option>';
     }).join('');
     var hasImg = !!c.img;
     var categoryAlign = safeCategoryAlignment(c.image_alignment);
@@ -2231,8 +2255,8 @@
     return '<div class="form-group"><label for="catType">Category Type *</label>' +
       '<select class="form-control" id="catType"><option value="main"' + (!parentSlug ? ' selected' : '') + '>Main Category</option><option value="sub"' + (parentSlug ? ' selected' : '') + '>Subcategory</option></select></div>' +
       '<div class="form-group" id="catParentWrap" style="' + (parentSlug ? '' : 'display:none;') + '"><label for="catParentSlug">Parent Category *</label>' +
-      '<select class="form-control" id="catParentSlug"><option value="">Select Main Category</option>' + parentOptions + '</select>' +
-      '<small style="display:block;margin-top:5px;color:#6a7c6f">This subcategory appears under the selected Main Category.</small></div>' +
+      '<select class="form-control" id="catParentSlug"><option value="">Select Parent Category</option>' + parentOptions + '</select>' +
+      '<small style="display:block;margin-top:5px;color:#6a7c6f">This subcategory appears under the selected Parent Category (any level).</small></div>' +
       '<div class="form-group"><label>Category Name *</label><input class="form-control" id="catName" maxlength="120" placeholder="e.g. Spices" value="' + escHtml(c.name || '') + '"></div>' +
       '<div class="form-group"><label>Tamil Name</label><input class="form-control" id="catTa" maxlength="150" placeholder="e.g. மசாலா பொருட்கள்" value="' + escHtml(c.ta || '') + '"></div>' +
       '<div class="form-group"><label>Description</label><textarea class="form-control" id="catDesc" maxlength="2000" placeholder="Brief description...">' + escHtml(c.blurb || '') + '</textarea></div>' +
@@ -2252,10 +2276,10 @@
       '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to zoom/move inside the fixed circle</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
       '</div><div style="padding:6px 12px;background:#f8f9f6;text-align:center"><button type="button" id="catImgAdjust" style="color:#176b37;border:1px solid #9abb9e;padding:7px 12px;background:white;border-radius:7px;cursor:pointer">↗ Adjust Image Size &amp; Position</button></div></div></div>' +
-      (c.parent_slug ? '' : '<div class="form-group" id="catExtraSubWrap" style="margin-top:20px;border-top:1px solid #e1e8df;padding-top:16px">' +
+      ('<div class="form-group" id="catExtraSubWrap" style="margin-top:20px;border-top:1px solid #e1e8df;padding-top:16px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><label style="margin:0">More Subcategories (optional)</label>' +
       '<button type="button" id="catAddExtraSub" class="btn-sm" style="border:1px solid #21743c;color:#176b37;background:white">+ Add Another Subcategory</button></div>' +
-      '<small style="display:block;color:#68796a;margin:6px 0 12px">Add as many subcategories as needed under the selected Main Category. Each has its own name, Tamil name, description and optional image.</small>' +
+      '<small style="display:block;color:#68796a;margin:6px 0 12px">Add as many subcategories as needed under this category. When creating a new subcategory, extra rows are siblings under its chosen parent. Each has its own name, Tamil name, description and optional image.</small>' +
       '<div id="catExtraSubList" aria-live="polite"></div><p id="catBatchSaveStatus" role="status" style="color:#536b56;margin-top:8px;font-size:12px"></p></div>');
   }
 
@@ -2359,8 +2383,8 @@
   function collectAdditionalSubcategories(modal, primary, cats, originalSlug) {
     var rows = Array.from(modal.querySelectorAll('[data-extra-sub-row]'));
     if (!rows.length) return [];
-    var parentSlug = primary.parent_slug || primary.slug;
-    if (!parentSlug) { toast('Choose a Main Category first.', 'error'); return null; }
+    var parentSlug = originalSlug ? primary.slug : (primary.parent_slug || primary.slug);
+    if (!parentSlug) { toast('Choose a Parent Category first.', 'error'); return null; }
     var used = Object.create(null);
     used[primary.slug] = true;
     cats.forEach(function (c) { if (c.slug !== originalSlug) used[c.slug] = true; });
@@ -2684,11 +2708,7 @@
 
   function renderCategoriesWithData(cats) {
     var products = (SITE && SITE.products) || [];
-    var groupedCats = cats.filter(function (c) { return !c.parent_slug; }).reduce(function (out, parent) {
-      out.push(parent);
-      cats.filter(function (child) { return child.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
-      return out;
-    }, []);
+    var groupedCats = orderedCategoryTree(cats);
     content.innerHTML =
       '<div class="page-toolbar">' +
       '<h3 style="font-size:15px;font-weight:600">Manage ' + cats.length + ' categories (Supabase)</h3>' +
@@ -2698,15 +2718,17 @@
       '<p role="status" class="small muted">Connected to the approved-admin backend. Category changes are saved to Supabase, not only this browser. Unsynced older local edits are not automatically uploaded.</p>' +
       '<div class="card"><div class="card__body" style="padding:0;overflow-x:auto">' +
       '<table class="admin-table"><thead><tr><th>#</th><th>Image</th><th>Category</th><th>Parent Category</th><th>Tamil Name</th><th>Slug</th><th>Products*</th><th>Actions</th></tr></thead>' +
-      '<tbody>' + groupedCats.map(function (c, i) {
+      '<tbody>' + groupedCats.map(function (entry, i) {
+        var c = entry.category;
         var count = products.filter(function (p) { return p.cat === c.slug; }).length;
         var imgCell = c.img
           ? '<img src="' + escHtml(c.img) + '" alt="' + escHtml(c.name) + '" style="width:40px;height:40px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #e2e8e0;display:block">'
           : '<span aria-label="No image">—</span>';
         var parent = cats.find(function (row) { return row.slug === c.parent_slug; });
-        return '<tr><td>' + (i + 1) + '</td><td>' + imgCell + '</td><td>' + (c.parent_slug ? '↳ ' : '') + '<b>' + escHtml(c.name) + '</b></td><td>' + (parent ? escHtml(parent.name) : '—') + '</td><td>' + escHtml(c.ta) + '</td><td><code>' + escHtml(c.slug) + '</code></td><td>' + count + '</td>' +
+        return '<tr><td>' + (i + 1) + '</td><td>' + imgCell + '</td><td><span style="display:inline-block;padding-left:' + (Math.min(entry.depth, 12) * 16) + 'px">' +
+          (entry.depth ? '↳ ' : '') + '<b>' + escHtml(c.name) + '</b></span></td><td>' + (parent ? escHtml(parent.name) : '—') + '</td><td>' + escHtml(c.ta) + '</td><td><code>' + escHtml(c.slug) + '</code></td><td>' + count + '</td>' +
           '<td><button class="btn-sm" data-edit-cat="' + escHtml(c.slug) + '">✏️ Edit</button> ' +
-          (!c.parent_slug ? '<button class="btn-sm" data-add-sub="' + escHtml(c.slug) + '">+ Subcategory</button> ' : '') +
+          '<button class="btn-sm" data-add-sub="' + escHtml(c.slug) + '">+ Subcategory</button> ' +
           '<button class="btn-sm btn-sm--danger" data-delete-cat="' + escHtml(c.slug) + '">🗑️</button></td></tr>';
       }).join('') +
       '</tbody></table><p class="small muted" style="padding:8px 12px">* Product counts use the current browser catalog; the server also checks DB references before deletion.</p></div></div>';
@@ -2761,7 +2783,7 @@
         if (!cat) return;
         var count = products.filter(function (p) { return p.cat === slug; }).length;
         if (count) { toast('Cannot delete: ' + count + ' products use this category.', 'error'); return; }
-        if (cats.some(function (c) { return c.parent_slug === slug; })) { toast('Move or delete its subcategories before deleting this Main Category.', 'error'); return; }
+        if (cats.some(function (c) { return c.parent_slug === slug; })) { toast('Move or delete its child subcategories before deleting this category.', 'error'); return; }
         openModal('Delete Category',
           '<p>Delete <b>' + escHtml(cat.name) + '</b> from Supabase? This cannot be undone.</p>',
           function (m) {
