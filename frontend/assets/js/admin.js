@@ -2041,7 +2041,10 @@
     var catPills = '<button class="cat-pill is-active" data-cat-filter="all">All <span class="cat-pill__count">' + allProducts.length + '</span></button>';
     cats.forEach(function (c) {
       var count = catCounts[c.slug] || 0;
-      if (count > 0) catPills += '<button class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' + escHtml(c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
+      // Every saved Supabase category must appear as a Products filter, even with zero products.
+      // The category is available immediately when Products is opened/refreshed;
+      // a zero count does not mean the category is unavailable.
+      catPills += '<button type="button" class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' + escHtml(c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
     });
    
 
@@ -2063,7 +2066,8 @@
       if (activeQ) list = list.filter(function (p) {
         return p.name.toLowerCase().indexOf(activeQ) > -1 || p.cat.toLowerCase().indexOf(activeQ) > -1;
       });
-      renderProductGrid(list);
+      var selectedCategory = cats.find(function (c) { return c.slug === activeCat; });
+      renderProductGrid(list, selectedCategory ? selectedCategory.name : '');
     }
     renderProductGrid(allProducts);
     $('#syncSupabaseBtn').addEventListener('click', renderProducts);
@@ -2094,11 +2098,14 @@
     });
   }
 
-  function renderProductGrid(products) {
+  function renderProductGrid(products, selectedCategoryName) {
     var grid = $('#productGrid');
     if (!grid) return;
     if (products.length === 0) {
-      grid.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/></svg><h4>No products found</h4><p>Try a different search term or add a new product.</p></div>';
+      var emptyHint = selectedCategoryName
+        ? 'No products in ' + escHtml(selectedCategoryName) + ' yet (or none match your search). Click + Add Product and choose this category.'
+        : 'Try a different search term or add a new product.';
+      grid.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7.5L12 3l9 4.5v9L12 21l-9-4.5z"/></svg><h4>No products found</h4><p>' + emptyHint + '</p></div>';
       return;
     }
     grid.innerHTML = products.map(function (p, idx) {
