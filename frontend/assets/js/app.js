@@ -1093,6 +1093,8 @@
       belowIndex = 0;
       belowCount = banners.length;
       sidebarZone.hidden = !belowCount;
+      // A deleted or moved image must not linger from a previous refresh.
+      if (!belowCount) { belowTrack.replaceChildren(); belowDots.replaceChildren(); return; }
       belowTrack.innerHTML = banners.map(function (b, index) {
         return '<a class="below-featured-slider__slide" href="' + esc(bannerHref(b.link)) +
           '" aria-label="' + esc(b.title || 'View collection') + '">' +
@@ -1284,6 +1286,12 @@
     fetchLiveBanners();
     // Recheck while the home page is open; no reload required after an admin save.
     setInterval(function () { if (!document.hidden) fetchLiveBanners(); }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) fetchLiveBanners();
+    });
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted) fetchLiveBanners();
+    });
 
     try {
       // pause on hover

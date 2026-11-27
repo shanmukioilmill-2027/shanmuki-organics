@@ -3561,8 +3561,10 @@
   }
 
   /* ============================================================ BANNERS */
-  function getBannerFormHTML(b) {
+  function getBannerFormHTML(b, fixedPlacement) {
     b = b || {};
+    var placement = fixedPlacement || b.position || 'hero';
+    var placementName = { hero: 'Hero Section', sidebar: 'Below Featured Products', promo: 'Promo Bar' }[placement] || 'Hero Section';
     return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">' +
       /* Title — full width */
       '<div style="grid-column:1/-1">' +
@@ -3577,11 +3579,8 @@
       /* Position */
       '<div>' +
       '<label class="field-label" for="bPosition">Position</label>' +
-      '<select id="bPosition" class="field-input">' +
-      '<option value="hero"' + (b.position === 'hero' ? ' selected' : '') + '>Hero Slider</option>' +
-      '<option value="promo"' + (b.position === 'promo' ? ' selected' : '') + '>Promo Bar</option>' +
-      '<option value="sidebar"' + (b.position === 'sidebar' ? ' selected' : '') + '>Below Featured — Full Width Slider</option>' +
-      '</select>' +
+      '<input id="bPosition" type="hidden" value="' + escHtml(placement) + '">' +
+      '<p class="field-input" style="margin:0;background:#f3f7f1;display:flex;align-items:center">' + escHtml(placementName) + '</p>' +
       '</div>' +
       /* Order */
       '<div>' +
@@ -3605,7 +3604,9 @@
       '<div id="bImgDropzone" class="img-dropzone"' + (b.image ? ' style="display:none"' : '') + '>' +
       '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#92a096" stroke-width="1.5" style="margin-bottom:6px"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
       '<p style="margin:0;font-size:14px;font-weight:600;color:#4a5548">Click to upload or drag & drop</p>' +
-      '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · Full-width banners: 1600×640px. Keep important details centered for mobile.</p>' +
+      '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · ' +
+      (placement === 'sidebar' ? 'Below Featured: 1600×240px recommended. Display height: 192px desktop / 140px mobile.' :
+        'Hero: 1600×640px recommended. Keep important content centered for mobile.') + '</p>' +
       '</div>' +
       '<div id="bImgPreview" class="img-preview"' + (!b.image ? ' style="display:none"' : '') + '>' +
       '<img id="bImgThumb" src="' + escHtml(b.image || '') + '" style="max-height:140px;border-radius:8px;object-fit:cover">' +
@@ -3738,25 +3739,52 @@
     });
   }
 
+  // Banner placements use the same secure Supabase table but must never share an admin list.
+  // 'sidebar' is the existing database placement for the Below Featured image slider.
+  var activeBannerTab = 'hero';
   function renderBannerList(banners) {
+    var placements = {
+      hero: { title: 'Hero Section Banners', subtitle: 'Top hero carousel only. Does not display below Featured Products.', add: '+ Add Hero Banner' },
+      sidebar: { title: 'Below Featured Products Banners', subtitle: 'Only here: slim full-width banner below Featured Products · 192px desktop / 140px mobile · maximum 5 images.', add: '+ Add Image' },
+      promo: { title: 'Promo Bar Banners', subtitle: 'Promotional cards between Below Featured and Why Choose Us.', add: '+ Add Promo Banner' }
+    };
+    if (!placements[activeBannerTab]) activeBannerTab = 'hero';
+    var current = activeBannerTab;
+    var visibleBanners = banners.filter(function (b) { return b.position === current; });
+    var belowCount = banners.filter(function (b) { return b.position === 'sidebar'; }).length;
+    var limitHit = current === 'sidebar' && belowCount >= 5;
+    var nav = ['hero', 'sidebar', 'promo'].map(function (tab) {
+      var count = banners.filter(function (b) { return b.position === tab; }).length;
+      var name = tab === 'hero' ? 'Hero Section' : tab === 'sidebar' ? 'Below Featured' : 'Promo Bar';
+      var selected = tab === current;
+      return '<button type="button" role="tab" data-banner-tab="' + tab + '" aria-controls="bannerSectionPanel" aria-selected="' + selected + '" ' +
+        'style="padding:12px 17px;border:1px solid ' + (selected ? '#14643a' : '#d4e1d1') + ';' +
+        'border-radius:9px;background:' + (selected ? '#166a3d' : '#fff') + ';color:' + (selected ? '#fff' : '#1c4d30') + ';' +
+        'font-size:13px;font-weight:600;cursor:pointer">' + name + ' (' + count + ')</button>';
+    }).join('');
     content.innerHTML =
       '<div class="page-toolbar"><h3 style="font-size:15px;font-weight:600">' + banners.length + ' Banners · Saved in Supabase</h3>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="btn-sm" id="importBrowserBanners" title="One-time import of browser-only Paused/Active changes">Import existing browser banners</button>' +
-      '<button class="btn-sm" id="refreshBanners">↻ Refresh</button>' +
-      '<button class="btn-sm btn-sm--primary" id="addBannerBtn">+ Add Banner</button></div></div>' +
-      '<div style="padding:15px 18px;margin:12px 0 18px;background:#f1f7eb;border:1px solid #c9dbc3;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
-      '<div><strong style="display:block;color:#135b32">Below Featured · Full-width Image Slider</strong>' +
-      '<span class="small muted">' + banners.filter(function (b) { return b.position === 'sidebar'; }).length + '/5 images · Below Featured Products on desktop and mobile. Images play in Display Order.</span></div>' +
-      '<button type="button" class="btn-sm btn-sm--primary" id="addBelowFeaturedBanner">+ Add Image</button></div>' +
-      '<p class="small muted">Live source: Supabase. Edit/Pause/Delete each image below. Old browser-only Pause and image changes are NOT published until you click "Import existing browser banners" once.</p>' +
-      '<div class="product-grid">' + banners.map(function (b, idx) {
+      '<button class="btn-sm" id="refreshBanners">↻ Refresh</button></div></div>' +
+      '<div role="tablist" aria-label="Choose banner placement" style="display:flex;gap:10px;flex-wrap:wrap;margin:16px 0">' + nav + '</div>' +
+      '<div id="bannerSectionPanel" role="tabpanel" aria-label="' + escHtml(placements[current].title) + '">' +
+      '<div style="padding:15px 18px;margin:0 0 18px;background:#f1f7eb;border:1px solid #c9dbc3;border-radius:12px;' +
+      'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
+      '<div><strong style="display:block;color:#135b32">' + escHtml(placements[current].title) + '</strong>' +
+      '<span class="small muted">' + escHtml(placements[current].subtitle) + '</span>' +
+      (current === 'sidebar' ? '<div class="small muted" style="margin-top:4px">' + belowCount + '/5 images uploaded. ' +
+        (belowCount === 0 ? 'No Below Featured banner is configured; nothing should appear in this section on the storefront.' :
+          'Only active images in this tab appear in the below-featured slider.') + '</div>' : '') + '</div>' +
+      '<button type="button" class="btn-sm btn-sm--primary" id="addBannerForSection"' + (limitHit ? ' disabled' : '') + '>' +
+      escHtml(placements[current].add) + '</button></div>' +
+      (visibleBanners.length ? '<div class="product-grid">' + visibleBanners.map(function (b, idx) {
         var uid = String(idx);
         return '<div class="product-admin-card">' +
           '<div class="product-admin-card__img" style="height:160px"><img src="' + escHtml(b.image) + '" alt="' + escHtml(b.title) + '" loading="lazy" onerror="this.style.display=\'none\'"></div>' +
           '<div class="product-admin-card__body">' +
           '<div class="product-admin-card__name">' + escHtml(b.title) + '</div>' +
-          '<div class="product-admin-card__cat">Position: ' + escHtml(b.position) + ' · Order: ' + b.order + '</div>' +
+          '<div class="product-admin-card__cat">Display Order: ' + b.order + '</div>' +
           (b.link ? '<div style="font-size:11px;color:var(--blue);margin-top:4px;word-break:break-all">' + escHtml(b.link) + '</div>' : '') +
           '<div class="product-admin-card__meta" style="margin-top:8px">' +
           '<span class="product-admin-card__stock ' + (b.active ? 'in' : 'out') + '">' + (b.active ? '● Active' : '● Paused') + '</span></div>' +
@@ -3765,9 +3793,18 @@
           '<button class="btn-sm" data-toggle-banner="' + uid + '">' + (b.active ? '⏸️ Pause' : '▶️ Activate') + '</button>' +
           '<button class="btn-sm btn-sm--danger" data-del-banner="' + uid + '">🗑️ Delete</button>' +
           '</div></div></div>';
-      }).join('') + '</div>';
+      }).join('') + '</div>' :
+        '<div style="padding:28px;border:1px dashed #b8cbbb;background:#fff;border-radius:12px;color:#58645c">' +
+        'No ' + escHtml(placements[current].title) + ' uploaded yet. Click ' + escHtml(placements[current].add) + ' to add one.</div>') +
+      '</div>';
 
     $('#refreshBanners').addEventListener('click', renderBanners);
+    $$('[data-banner-tab]', content).forEach(function (button) {
+      button.addEventListener('click', function () {
+        activeBannerTab = button.getAttribute('data-banner-tab');
+        renderBannerList(banners);
+      });
+    });
 
     $('#importBrowserBanners').addEventListener('click', function () {
       var local = read(AK.banners, null);
@@ -3788,52 +3825,36 @@
       }).finally(function () { if (btn.isConnected) btn.disabled = false; });
     });
 
-    $('#addBelowFeaturedBanner').addEventListener('click', function () {
-      var existing = banners.filter(function (b) { return b.position === 'sidebar'; });
-      if (existing.length >= 5) {
-        toast('Maximum 5 images. Edit or delete an existing Below Featured image first.', 'warn');
-        return;
+    $('#addBannerForSection').addEventListener('click', function () {
+      if (current === 'sidebar' && belowCount >= 5) {
+        toast('Maximum 5 Below Featured images allowed. Edit or delete an existing image first.', 'warn'); return;
       }
-      var nextOrder = Math.max.apply(null, [0].concat(existing.map(function (b) { return b.order; }))) + 1;
-      var modal = openModal('Add Below Featured Image (' + (existing.length + 1) + '/5)',
-        getBannerFormHTML({ position: 'sidebar', order: nextOrder }), function (m) {
+      var nextOrder = Math.max.apply(null, [0].concat(visibleBanners.map(function (b) { return b.order; }))) + 1;
+      var modal = openModal('Add ' + placements[current].title,
+        getBannerFormHTML({ position: current, order: nextOrder }, current), function (m) {
           var banner = readBannerForm(m);
           if (!banner) return false;
-          if (banner.position === 'sidebar' && existing.length >= 5) {
-            toast('Only 5 Below Featured images are allowed.', 'warn'); return false;
+          // Placement is bound to the tab; never publish a hero image to the bottom slider.
+          banner.position = current;
+          if (current === 'sidebar' && belowCount >= 5) {
+            toast('Maximum 5 Below Featured images allowed.', 'warn'); return false;
           }
-          banner.id = 'bf' + Date.now();
-          return bannerSaveFromModal(m, banner, 'New image added to the homepage slider.');
+          banner.id = 'b' + Date.now();
+          return bannerSaveFromModal(m, banner, 'Banner added to ' + placements[current].title + '.');
         });
-      initBannerImgUpload(modal);
-    });
-
-    $('#addBannerBtn').addEventListener('click', function () {
-      var modal = openModal('Add New Banner', getBannerFormHTML(), function (m) {
-        var banner = readBannerForm(m);
-        if (!banner) return false;
-        if (banner.position === 'sidebar' && banners.filter(function (b) { return b.position === 'sidebar'; }).length >= 5) {
-          toast('Maximum 5 Below Featured images. Edit or delete an existing image first.', 'warn'); return false;
-        }
-        banner.id = 'b' + Date.now();
-        return bannerSaveFromModal(m, banner, 'Banner published to Supabase.');
-      });
       initBannerImgUpload(modal);
     });
 
     $$('[data-edit-banner]', content).forEach(function (button) {
       button.addEventListener('click', function () {
-        var old = banners[Number(button.getAttribute('data-edit-banner'))];
+        var old = visibleBanners[Number(button.getAttribute('data-edit-banner'))];
         if (!old) return;
-        var modal = openModal('Edit Banner', getBannerFormHTML(old), function (m) {
+        var modal = openModal('Edit ' + placements[current].title, getBannerFormHTML(old, current), function (m) {
           var updated = readBannerForm(m);
           if (!updated) return false;
-          if (updated.position === 'sidebar' && old.position !== 'sidebar' &&
-            banners.filter(function (b) { return b.position === 'sidebar'; }).length >= 5) {
-            toast('Maximum 5 Below Featured images. Edit or delete an existing image first.', 'warn'); return false;
-          }
           updated.id = old.id;
-          return bannerSaveFromModal(m, updated, 'Banner updated in Supabase.');
+          updated.position = old.position;
+          return bannerSaveFromModal(m, updated, 'Banner updated in ' + placements[current].title + '.');
         });
         initBannerImgUpload(modal);
       });
@@ -3841,7 +3862,7 @@
 
     $$('[data-toggle-banner]', content).forEach(function (button) {
       button.addEventListener('click', function () {
-        var b = banners[Number(button.getAttribute('data-toggle-banner'))];
+        var b = visibleBanners[Number(button.getAttribute('data-toggle-banner'))];
         if (!b) return;
         button.disabled = true;
         bannerApi('toggle', { slug: b.id, active: !b.active }).then(function () {
@@ -3855,7 +3876,7 @@
 
     $$('[data-del-banner]', content).forEach(function (button) {
       button.addEventListener('click', function () {
-        var b = banners[Number(button.getAttribute('data-del-banner'))];
+        var b = visibleBanners[Number(button.getAttribute('data-del-banner'))];
         if (!b) return;
         openModal('Delete Banner',
           '<p>Delete <b>' + escHtml(b.title) + '</b> from Supabase? This cannot be undone.</p>', function (m) {
