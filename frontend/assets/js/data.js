@@ -664,81 +664,62 @@
     };
   }
 
-  /* Category Image: full-photo, non-cropping placement for admin preview and storefront.
-   * Scale 50..160 selects a size BETWEEN safe limits, not CSS zoom past the frame.
-   * X/Y controls reposition the whole image only within its available free space.
-   * For circles, all four photo corners stay inside the inner circle.
-   * No upload bytes or server metadata are modified by this layout helper. */
+  /* Category image renderer — one real image, one circle, same algorithm for
+   * the Admin alignment popup and the frontend carousel.  No duplicated or
+   * blurred background images. Uploaded source bytes remain untouched.
+   *
+   * A rectangular photo cannot fill a circle without hiding its corners:
+   * CSS masks only the display, not the original uploaded image. */
   function fitCategoryImage(img, alignment, circle) {
     if (!img || !img.parentElement || !img.naturalWidth || !img.naturalHeight) return;
     var host = img.parentElement;
     var frameW = host.clientWidth, frameH = host.clientHeight;
-    if (frameW < 1 || frameH < 1) return; // e.g. category preview not visible yet
+    if (frameW < 1 || frameH < 1) return;
     var a = categoryAlignment(alignment);
-    var nw = img.naturalWidth, nh = img.naturalHeight;
-    var maxFit = circle
-      ? (Math.min(frameW, frameH) * 0.94) / Math.hypot(nw, nh)
-      : Math.min(frameW * 0.96 / nw, frameH * 0.96 / nh);
-    // Keep full photo visible at every slider value. At 160% it reaches the
-    // largest uncropped size; at 50% it is smaller with more room to reposition.
-    var safeSize = 0.55 + (a.scale - 50) * 0.45 / 110;
-    var w = nw * maxFit * safeSize, h = nh * maxFit * safeSize;
-    var dx = (frameW - w) / 2 * a.x / 50;
-    var dy = (frameH - h) / 2 * a.y / 50;
-    if (circle) {
-      // Movement inside a circle is more constrained than movement inside a box.
-      // Clamping corners avoids a rectangular photo being cut by the circle.
-      var r = Math.min(frameW, frameH) * 0.475;
-      var maxDy = Math.max(0, Math.sqrt(Math.max(0, r * r - w * w / 4)) - h / 2);
-      dy = Math.max(-maxDy, Math.min(maxDy, dy));
-      var maxDx = Math.max(0, Math.sqrt(Math.max(0, r * r - Math.pow(Math.abs(dy) + h / 2, 2))) - w / 2);
-      dx = Math.max(-maxDx, Math.min(maxDx, dx));
-    }
+    var ambience = host.querySelector('[data-category-ambient]');
+    if (ambience) ambience.remove(); // remove previous release's blurred duplicate
+
     host.style.position = 'relative';
+    // Same circular frame for Admin and storefront.  Values are ratios of the
+    // frame diameter so a 420px editor preview matches a 200px category tile.
     if (circle) {
-      // The source is rectangular. A soft circular ambient layer fills the ring
-      // while the actual uploaded image remains fully fitted in the foreground.
-      // This removes the harsh square-on-white appearance without cropping the
-      // image file or introducing a second saved image.
+      var diameter = Math.min(frameW, frameH);
+      var imageSize = diameter * a.scale / 100;
+      var xOffset = diameter * a.x / 200;
+      var yOffset = diameter * a.y / 200;
       host.style.overflow = 'hidden';
       host.style.borderRadius = '50%';
       host.style.backgroundColor = '#fff';
-      var ambience = host.querySelector('[data-category-ambient]');
-      if (!ambience) {
-        ambience = document.createElement('span');
-        ambience.setAttribute('data-category-ambient', '');
-        ambience.setAttribute('aria-hidden', 'true');
-        ambience.style.cssText = 'position:absolute;inset:5px;display:block;border-radius:50%;pointer-events:none;overflow:hidden;z-index:0';
-        host.insertBefore(ambience, img);
-      }
-      ambience.style.backgroundImage = 'url(' + JSON.stringify(img.getAttribute('src') || '') + ')';
-      ambience.style.backgroundSize = 'cover';
-      ambience.style.backgroundPosition = 'center';
-      ambience.style.backgroundRepeat = 'no-repeat';
-      ambience.style.filter = 'blur(3px)';
-      ambience.style.opacity = '.78';
-      img.style.zIndex = '1';
-      // Feather only the rectangular photo edges. The middle remains sharp,
-      // while the underlying same-photo circular fill covers the remaining area.
-      img.style.webkitMaskImage = 'radial-gradient(ellipse, #000 62%, transparent 100%)';
-      img.style.maskImage = 'radial-gradient(ellipse, #000 62%, transparent 100%)';
+      img.style.position = 'absolute';
+      img.style.width = imageSize + 'px';
+      img.style.height = imageSize + 'px';
+      img.style.left = ((frameW - imageSize) / 2 + xOffset) + 'px';
+      img.style.top = ((frameH - imageSize) / 2 + yOffset) + 'px';
+      img.style.objectFit = 'cover';
+      img.style.borderRadius = '50%'; // never display a rectangular edge
     } else {
-      img.style.webkitMaskImage = 'none';
-      img.style.maskImage = 'none';
-      img.style.zIndex = '';
+      // Keep any existing non-circular category layouts uncropped.
+      var nw = img.naturalWidth, nh = img.naturalHeight;
+      var safeFit = Math.min(frameW * .96 / nw, frameH * .96 / nh);
+      var safeSize = .55 + (a.scale - 50) * .45 / 110;
+      var w = nw * safeFit * safeSize, h = nh * safeFit * safeSize;
+      img.style.position = 'absolute';
+      img.style.width = w + 'px';
+      img.style.height = h + 'px';
+      img.style.left = ((frameW - w) / 2 + (frameW - w) / 2 * a.x / 50) + 'px';
+      img.style.top = ((frameH - h) / 2 + (frameH - h) / 2 * a.y / 50) + 'px';
+      img.style.objectFit = 'contain';
+      img.style.borderRadius = '0';
     }
-    img.style.position = 'absolute';
-    img.style.width = w + 'px';
-    img.style.height = h + 'px';
+    // Reset all styling left by the earlier blur/feather and generic CSS.
+    img.style.webkitMaskImage = 'none';
+    img.style.maskImage = 'none';
+    img.style.zIndex = '1';
     img.style.maxWidth = 'none';
     img.style.maxHeight = 'none';
-    img.style.left = ((frameW - w) / 2 + dx) + 'px';
-    img.style.top = ((frameH - h) / 2 + dy) + 'px';
     img.style.transform = 'none';
     img.style.transformOrigin = 'center center';
-    img.style.objectFit = 'contain';
     img.style.objectPosition = 'center center';
-    img.style.borderRadius = '0';
     img.style.padding = '0';
     img.style.margin = '0';
     img.style.background = 'transparent';

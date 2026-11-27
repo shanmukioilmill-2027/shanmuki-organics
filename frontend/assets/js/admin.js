@@ -2212,7 +2212,7 @@
       '<div style="font-size:11px;color:#92a096;margin-top:4px">PNG / JPG / WebP up to 5MB · best 800×600 px</div>' +
       '</div>' +
       '<div id="catImgPreview" style="' + previewStyle + 'position:relative;border-radius:10px;overflow:hidden;border:1px solid #e2e8e0;margin-top:6px">' +
-      '<div style="overflow:hidden;height:260px;background:#fff"><img id="catImgThumb" src="' + escHtml(c.img || '') + '" role="button" tabindex="0" aria-label="Adjust category image size and position" title="Click or press Enter to adjust image" style="width:100%;height:100%;object-fit:contain;display:block;cursor:zoom-in;transform-origin:center center;" alt="Category preview"></div>' +
+      '<div style="position:relative;overflow:hidden;width:min(100%,260px);aspect-ratio:1;margin:12px auto;background:#fff;border-radius:50%"><img id="catImgThumb" src="' + escHtml(c.img || '') + '" role="button" tabindex="0" aria-label="Adjust category image size and position" title="Click or press Enter to adjust image" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;cursor:zoom-in;transform-origin:center center;" alt="Category preview"></div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#f8f9f6">' +
       '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to adjust its size and position</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
@@ -2230,7 +2230,7 @@
     var adjustBtn = modal.querySelector('#catImgAdjust');
     function updateCategoryPreview() {
       if (SITE && typeof SITE.fitCategoryImage === 'function') {
-        SITE.fitCategoryImage(thumb, categoryAlignmentFromForm(modal), false);
+        SITE.fitCategoryImage(thumb, categoryAlignmentFromForm(modal), true);
       }
     }
     thumb.addEventListener('load', updateCategoryPreview);
@@ -2257,9 +2257,9 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">This is the actual circular storefront preview. The rectangular photo stays fitted, with a soft same-photo background filling the circle. Drag or use the sliders to adjust the image.</p>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">One image only, with no blur or square edges. This circle uses exactly the same size and position as your storefront category circle. The original photo file stays unchanged; only the display corners are masked.</p>' +
           '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Storefront category circle preview</div>' +
-          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;transform-origin:center center"></div>' +
+          '<div data-cat-align-stage style="background:#fff;border:0;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative;box-shadow:0 0 0 1px #d7e2d4"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;pointer-events:none;transform-origin:center center"></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
             '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
             '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-cat-align-x-label></output><input data-cat-align-x type="range" min="-50" max="50" step="1"></label>' +
