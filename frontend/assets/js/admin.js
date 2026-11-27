@@ -2251,7 +2251,12 @@
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#f8f9f6">' +
       '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to zoom/move inside the fixed circle</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
-      '</div><div style="padding:6px 12px;background:#f8f9f6;text-align:center"><button type="button" id="catImgAdjust" style="color:#176b37;border:1px solid #9abb9e;padding:7px 12px;background:white;border-radius:7px;cursor:pointer">↗ Adjust Image Size &amp; Position</button></div></div></div>';
+      '</div><div style="padding:6px 12px;background:#f8f9f6;text-align:center"><button type="button" id="catImgAdjust" style="color:#176b37;border:1px solid #9abb9e;padding:7px 12px;background:white;border-radius:7px;cursor:pointer">↗ Adjust Image Size &amp; Position</button></div></div></div>' +
+      (c.parent_slug ? '' : '<div class="form-group" id="catExtraSubWrap" style="margin-top:20px;border-top:1px solid #e1e8df;padding-top:16px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><label style="margin:0">More Subcategories (optional)</label>' +
+      '<button type="button" id="catAddExtraSub" class="btn-sm" style="border:1px solid #21743c;color:#176b37;background:white">+ Add Another Subcategory</button></div>' +
+      '<small style="display:block;color:#68796a;margin:6px 0 12px">Add as many subcategories as needed under the selected Main Category. Each has its own name, Tamil name, description and optional image.</small>' +
+      '<div id="catExtraSubList" aria-live="polite"></div><p id="catBatchSaveStatus" role="status" style="color:#536b56;margin-top:8px;font-size:12px"></p></div>');
   }
 
 
@@ -2268,6 +2273,171 @@
     }
     kind.addEventListener('change', update);
     update();
+  }
+
+  // Repeating subcategory rows are UI-only until the approved-admin Save succeeds.
+  // No child writes go through public Supabase APIs or localStorage.
+  function initAdditionalSubcategoryRows(modal) {
+    var add = modal.querySelector('#catAddExtraSub');
+    var list = modal.querySelector('#catExtraSubList');
+    if (!add || !list) return;
+    var count = 0;
+    function addRow() {
+      count++;
+      var row = document.createElement('div');
+      row.setAttribute('data-extra-sub-row', '');
+      row.style.cssText = 'border:1px solid #dce7db;background:#f8fbf6;border-radius:12px;padding:14px;margin-bottom:12px';
+      row.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+        '<strong data-sub-heading>Subcategory ' + count + '</strong>' +
+        '<button type="button" data-remove-extra class="btn-sm" style="color:#b43c38">Remove</button></div>' +
+        '<div class="form-group"><label>Subcategory Name *</label><input class="form-control" maxlength="120" data-extra-name placeholder="e.g. Mappillai Samba Rice"></div>' +
+        '<div class="form-group"><label>Tamil Name</label><input class="form-control" maxlength="150" data-extra-ta placeholder="தமிழ் பெயர்"></div>' +
+        '<div class="form-group"><label>Description</label><textarea class="form-control" maxlength="2000" data-extra-desc placeholder="Brief description..."></textarea></div>' +
+        '<div class="form-group"><label>Image (optional)</label>' +
+        '<input type="file" accept="image/png,image/jpeg,image/webp" data-extra-image-file class="form-control">' +
+        '<small style="display:block;color:#708071;margin:5px 0">PNG/JPG/WebP up to 5 MB. The uploaded image is compressed before saving.</small>' +
+        '<img data-extra-image-preview alt="Subcategory image preview" style="display:none;max-width:120px;max-height:100px;object-fit:contain;margin-top:8px;background:white;border-radius:8px;border:1px solid #e2e8e0"></div>';
+      row._categoryImage = '';
+      row._categoryImagePending = false;
+      row.querySelector('[data-remove-extra]').addEventListener('click', function () {
+        if (row.getAttribute('data-extra-saved') === 'true') return;
+        row.remove();
+        Array.from(list.querySelectorAll('[data-extra-sub-row]')).forEach(function (item, index) {
+          item.querySelector('[data-sub-heading]').textContent = 'Subcategory ' + (index + 1);
+        });
+      });
+      row.querySelector('[data-extra-image-file]').addEventListener('change', function (event) {
+        var file = event.target.files && event.target.files[0];
+        var preview = row.querySelector('[data-extra-image-preview]');
+        row._categoryImage = '';
+        preview.style.display = 'none';
+        if (!file) return;
+        if (!/^(image\/png|image\/jpeg|image\/webp)$/.test(file.type) || file.size > 5 * 1024 * 1024) {
+          toast('Select a PNG/JPG/WebP image under 5 MB.', 'error');
+          event.target.value = '';
+          return;
+        }
+        row._categoryImagePending = true;
+        var url = URL.createObjectURL(file);
+        var image = new Image();
+        image.onload = function () {
+          try {
+            var width = image.naturalWidth, height = image.naturalHeight;
+            var ratio = Math.min(1, 800 / width, 600 / height);
+            var canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(width * ratio));
+            canvas.height = Math.max(1, Math.round(height * ratio));
+            var context = canvas.getContext('2d');
+            context.fillStyle = '#fff';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            row._categoryImage = encodeImage(canvas, IMG_KB.category);
+            preview.src = row._categoryImage;
+            preview.style.display = 'block';
+          } catch (error) {
+            row._categoryImage = '';
+            toast('Could not process the subcategory image.', 'error');
+          } finally {
+            row._categoryImagePending = false;
+            URL.revokeObjectURL(url);
+          }
+        };
+        image.onerror = function () {
+          row._categoryImagePending = false;
+          URL.revokeObjectURL(url);
+          toast('Could not read the subcategory image.', 'error');
+        };
+        image.src = url;
+      });
+      list.appendChild(row);
+      row.querySelector('[data-extra-name]').focus();
+    }
+    add.addEventListener('click', addRow);
+  }
+
+  function collectAdditionalSubcategories(modal, primary, cats, originalSlug) {
+    var rows = Array.from(modal.querySelectorAll('[data-extra-sub-row]'));
+    if (!rows.length) return [];
+    var parentSlug = primary.parent_slug || primary.slug;
+    if (!parentSlug) { toast('Choose a Main Category first.', 'error'); return null; }
+    var used = Object.create(null);
+    used[primary.slug] = true;
+    cats.forEach(function (c) { if (c.slug !== originalSlug) used[c.slug] = true; });
+    var extra = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var name = row.querySelector('[data-extra-name]').value.trim();
+      if (!name) { toast('Enter a name for Subcategory ' + (i + 1) + '.', 'error'); row.querySelector('[data-extra-name]').focus(); return null; }
+      if (row._categoryImagePending) { toast('Please finish uploading the image for ' + name + '.', 'error'); return null; }
+      var base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      var slug = parentSlug + '-' + base;
+      if (!base || slug.length > 90) { toast('Use a shorter English name for ' + name + '.', 'error'); return null; }
+      if (used[slug] && row.getAttribute('data-extra-saved') !== 'true') { toast('Duplicate subcategory: ' + name, 'error'); return null; }
+      used[slug] = true;
+      extra.push({ row: row, category: {
+        slug: slug, name: name, ta: row.querySelector('[data-extra-ta]').value.trim(),
+        blurb: row.querySelector('[data-extra-desc]').value.trim(), img: row._categoryImage || '',
+        parent_slug: parentSlug, image_alignment: { scale: 100, x: 0, y: 0 }
+      } });
+    }
+    return extra;
+  }
+
+  // An existing approved-admin single-item endpoint is reused sequentially.
+  // A partial failure is reported truthfully; previously saved rows are not resent on Retry.
+  function saveCategoryAndSubcategories(modal, primary, originalSlug, extra) {
+    var button = modal.querySelector('[data-save]');
+    if (button.disabled) return false;
+    var status = modal.querySelector('#catBatchSaveStatus');
+    var originalLabel = button.textContent;
+    button.disabled = true;
+    Array.from(modal.querySelectorAll('[data-close]')).forEach(function (item) { item.disabled = true; });
+    var completed = 0;
+    var target = extra.length + (modal.dataset.catPrimarySaved === 'true' ? 0 : 1);
+    function update(text) { button.textContent = 'Saving ' + completed + '/' + target + '…'; if (status) status.textContent = text; }
+    update('Saving securely to Supabase…');
+    var first = modal.dataset.catPrimarySaved === 'true' ? Promise.resolve() : upsertCategoryToSupabase(primary, originalSlug).then(function () {
+      modal.dataset.catPrimarySaved = 'true';
+      // Primary row is now committed; keep it locked so a retry cannot silently
+      // change its parent/name while other rows are still being created.
+      ['#catName', '#catTa', '#catDesc', '#catType', '#catParentSlug', '#catImgFile', '#catImgAdjust', '#catImgRemove'].forEach(function (selector) {
+        var field = modal.querySelector(selector);
+        if (field) field.disabled = true;
+      });
+      var dropzone = modal.querySelector('#catImgDropzone');
+      if (dropzone) dropzone.style.pointerEvents = 'none';
+      completed++;
+      update('Main Category / first Subcategory saved. Saving additional rows…');
+    });
+    extra.forEach(function (entry) {
+      first = first.then(function () {
+        if (entry.row.getAttribute('data-extra-saved') === 'true') return;
+        return upsertCategoryToSupabase(entry.category).then(function () {
+          entry.row.setAttribute('data-extra-saved', 'true');
+          entry.row.style.opacity = '.7';
+          entry.row.querySelectorAll('input,textarea,button').forEach(function (element) { element.disabled = true; });
+          entry.row.querySelector('[data-sub-heading]').textContent += ' ✓ Saved';
+          completed++;
+          update('Saved ' + completed + ' of ' + target + '.');
+        });
+      });
+    });
+    first.then(function () {
+      if (modal.parentNode) modal.remove();
+      toast('Category and ' + extra.length + ' additional subcategories saved to Supabase!');
+      if (pageTitle.textContent === 'Categories') renderCategories();
+    }).catch(function (error) {
+      var message = error && error.message ? error.message : String(error);
+      if (status) status.textContent = completed + ' saved in this attempt; remaining records were not saved. Fix the error and press Retry Save. ' + message;
+      toast('Supabase save stopped: ' + message, 'error');
+      button.disabled = false;
+      button.textContent = 'Retry Save';
+    }).finally(function () {
+      Array.from(modal.querySelectorAll('[data-close]')).forEach(function (item) { item.disabled = false; });
+      if (!button.disabled && button.textContent !== 'Retry Save') button.textContent = originalLabel;
+    });
+    return false;
   }
 
   function initCategoryImageUpload(modal) {
@@ -2549,10 +2719,15 @@
         if (cats.some(function (c) { return c.slug === category.slug; })) {
           toast('A category with this slug already exists.', 'error'); return false;
         }
+        var extras = collectAdditionalSubcategories(m, category, cats, null);
+        if (!extras) return false;
+        if (extras.length || m.dataset.catPrimarySaved === 'true')
+          return saveCategoryAndSubcategories(m, category, null, extras);
         return categorySaveInModal(m, upsertCategoryToSupabase(category), 'Category saved to Supabase successfully!');
       });
       initCategoryHierarchyFields(modal);
       initCategoryImageUpload(modal);
+      initAdditionalSubcategoryRows(modal);
     }
     $('#addCatBtn').addEventListener('click', function () { openAddCategory(null); });
     $$('[data-add-sub]', content).forEach(function (btn) {
@@ -2567,10 +2742,15 @@
         var modal = openModal('Edit Category', getCategoryFormHTML(cat, cats), function (m) {
           var category = categoryPayload(m, slug); // Keep original slug: linked products depend on it.
           if (!category) return false;
+          var extras = collectAdditionalSubcategories(m, category, cats, slug);
+          if (!extras) return false;
+          if (extras.length || m.dataset.catPrimarySaved === 'true')
+            return saveCategoryAndSubcategories(m, category, slug, extras);
           return categorySaveInModal(m, upsertCategoryToSupabase(category, slug), 'Category updated in Supabase!');
         });
         initCategoryHierarchyFields(modal);
         initCategoryImageUpload(modal);
+        initAdditionalSubcategoryRows(modal);
       });
     });
 
