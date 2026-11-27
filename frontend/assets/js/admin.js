@@ -3561,6 +3561,26 @@
   }
 
   /* ============================================================ BANNERS */
+  // The storefront and editor use the same X/Y (image-width/image-height %),
+  // zoom and object-fit values. Each viewport has its own saved adjustment.
+  function bannerImageView(value) {
+    value = value && typeof value === 'object' ? value : {};
+    function bounded(v, fallback, min, max) {
+      var n = typeof v === 'number' || typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+    }
+    return {
+      fit: value.fit === 'contain' ? 'contain' : 'cover',
+      zoom: bounded(value.zoom, 1, .6, 3),
+      x: bounded(value.x, 0, -50, 50),
+      y: bounded(value.y, 0, -50, 50)
+    };
+  }
+  function bannerImageSettings(raw) {
+    raw = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    return { desktop: bannerImageView(raw.desktop), mobile: bannerImageView(raw.mobile) };
+  }
+
   function getBannerFormHTML(b, fixedPlacement) {
     b = b || {};
     var placement = fixedPlacement || b.position || 'hero';
@@ -3605,19 +3625,37 @@
       '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#92a096" stroke-width="1.5" style="margin-bottom:6px"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
       '<p style="margin:0;font-size:14px;font-weight:600;color:#4a5548">Click to upload or drag & drop</p>' +
       '<p style="margin:4px 0 0;font-size:12px;color:#92a096">PNG, JPG up to 5MB · ' +
-      (placement === 'sidebar' ? 'Below Featured: 1600×240px recommended. Display height: 192px desktop / 140px mobile.' :
+      (placement === 'sidebar' ? 'Below Featured: upload a wide photo; choose Fit (no crop) or Fill. Size: 192px desktop / 140px mobile.' :
         'Hero: 1600×640px recommended. Keep important content centered for mobile.') + '</p>' +
       '</div>' +
       '<div id="bImgPreview" class="img-preview"' + (!b.image ? ' style="display:none"' : '') + '>' +
-      '<img id="bImgThumb" src="' + escHtml(b.image || '') + '" style="max-height:140px;border-radius:8px;object-fit:cover">' +
+      '<img id="bImgThumb" src="' + escHtml(b.image || '') + '" title="Double-click to adjust the image position" style="max-height:140px;border-radius:8px;object-fit:cover;cursor:' + (placement === 'sidebar' ? 'zoom-in' : 'default') + '">' +
       '<span id="bImgInfo" style="font-size:12px;color:#6f7d72;margin-top:6px">Current image</span>' +
       '<button type="button" id="bImgRemove" class="btn-sm btn-sm--danger" style="margin-top:8px">Remove Image</button>' +
       '</div>' +
+      (placement === 'sidebar' ?
+        '<div id="bAlignEditor" class="banner-position-editor"' + (!b.image ? ' hidden' : '') + '>' +
+        '<div class="banner-position-editor__head"><strong>Image Size &amp; Position</strong>' +
+        '<span>Preview updates immediately. Save to publish on the website.</span></div>' +
+        '<div class="banner-position-editor__tabs" role="tablist" aria-label="Banner preview device">' +
+        '<button type="button" class="is-active" data-banner-device="desktop" aria-selected="true" role="tab">Desktop Preview</button>' +
+        '<button type="button" data-banner-device="mobile" aria-selected="false" role="tab">Mobile Preview</button></div>' +
+        '<div class="banner-position-editor__stage-wrap"><div id="bAlignStage" class="banner-position-editor__stage" data-device="desktop" aria-label="Drag to move the banner image" tabindex="0">' +
+        '<img id="bAlignImage" src="' + escHtml(b.image || '') + '" alt="Live banner crop preview" draggable="false"></div></div>' +
+        '<p class="banner-position-editor__tip">Drag the image to move it. Use Fit to show the entire photo without cutting it; Fill covers the full banner width.</p>' +
+        '<div class="banner-position-editor__fields">' +
+        '<label>Display Mode<select id="bAlignFit" class="field-input"><option value="cover">Fill Banner (may crop)</option><option value="contain">Fit Full Image (no crop)</option></select></label>' +
+        '<label>Size / Zoom <output id="bAlignZoomValue">100%</output><input id="bAlignZoom" type="range" min="60" max="300" step="5" value="100"></label>' +
+        '<label>Left / Right <output id="bAlignXValue">0%</output><input id="bAlignX" type="range" min="-50" max="50" step="1" value="0"></label>' +
+        '<label>Up / Down <output id="bAlignYValue">0%</output><input id="bAlignY" type="range" min="-50" max="50" step="1" value="0"></label>' +
+        '</div><button type="button" id="bAlignReset" class="btn-sm">Reset this device</button>' +
+        '<p class="banner-position-editor__tip">Desktop and mobile settings are separate. Switch tabs to adjust each view.</p>' +
+        '</div>' : '') +
       '</div>' +
       '</div>';
   }
 
-  function initBannerImgUpload(modal) {
+  function initBannerImgUpload(modal, previousBanner) {
     var fileInput = modal.querySelector('#bImgFile');
     var dropzone = modal.querySelector('#bImgDropzone');
     var preview = modal.querySelector('#bImgPreview');
@@ -3625,6 +3663,16 @@
     var info = modal.querySelector('#bImgInfo');
     var removeBtn = modal.querySelector('#bImgRemove');
     var hiddenInput = modal.querySelector('#bImg');
+    var editor = modal.querySelector('#bAlignEditor');
+    var editorPreview = modal.querySelector('#bAlignImage');
+    if (editor) {
+      initBelowFeaturedImageEditor(modal, previousBanner && previousBanner.image_settings);
+      thumb.addEventListener('dblclick', function () {
+        editor.hidden = false;
+        editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        modal.querySelector('#bAlignStage').focus({ preventScroll: true });
+      });
+    }
 
     function compressImg(file, cb) {
       var img = new Image();
@@ -3649,6 +3697,7 @@
         hiddenInput.value = dataUrl; thumb.src = dataUrl;
         info.textContent = file.name + ' (compressed)';
         dropzone.style.display = 'none'; preview.style.display = 'block';
+        if (editor) { editor.hidden = false; editorPreview.src = dataUrl; }
       });
     }
 
@@ -3660,7 +3709,75 @@
     removeBtn.addEventListener('click', function () {
       hiddenInput.value = ''; thumb.src = ''; fileInput.value = '';
       preview.style.display = 'none'; dropzone.style.display = '';
+      if (editor) { editor.hidden = true; editorPreview.removeAttribute('src'); }
     });
+  }
+
+  function initBelowFeaturedImageEditor(modal, original) {
+    var settings = bannerImageSettings(original);
+    modal._bannerImageSettings = settings;
+    var device = 'desktop';
+    var stage = modal.querySelector('#bAlignStage');
+    var img = modal.querySelector('#bAlignImage');
+    var fit = modal.querySelector('#bAlignFit');
+    var zoom = modal.querySelector('#bAlignZoom');
+    var x = modal.querySelector('#bAlignX');
+    var y = modal.querySelector('#bAlignY');
+    var tabs = modal.querySelectorAll('[data-banner-device]');
+    var dragging = null;
+    function paint() {
+      var v = settings[device];
+      stage.setAttribute('data-device', device);
+      img.style.objectFit = v.fit;
+      img.style.transform = 'translate(' + v.x + '%, ' + v.y + '%) scale(' + v.zoom + ')';
+      fit.value = v.fit;
+      zoom.value = String(Math.round(v.zoom * 100));
+      x.value = String(v.x);
+      y.value = String(v.y);
+      modal.querySelector('#bAlignZoomValue').textContent = Math.round(v.zoom * 100) + '%';
+      modal.querySelector('#bAlignXValue').textContent = v.x + '%';
+      modal.querySelector('#bAlignYValue').textContent = v.y + '%';
+      Array.prototype.forEach.call(tabs, function (tab) {
+        var active = tab.getAttribute('data-banner-device') === device;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+    }
+    Array.prototype.forEach.call(tabs, function (tab) {
+      tab.addEventListener('click', function () { device = tab.getAttribute('data-banner-device'); paint(); });
+    });
+    fit.addEventListener('change', function () { settings[device].fit = fit.value; paint(); });
+    zoom.addEventListener('input', function () { settings[device].zoom = Number(zoom.value) / 100; paint(); });
+    x.addEventListener('input', function () { settings[device].x = Number(x.value); paint(); });
+    y.addEventListener('input', function () { settings[device].y = Number(y.value); paint(); });
+    modal.querySelector('#bAlignReset').addEventListener('click', function () {
+      settings[device] = bannerImageView(null); paint();
+    });
+    stage.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      event.preventDefault();
+      dragging = { id: event.pointerId, clientX: event.clientX, clientY: event.clientY,
+        x: settings[device].x, y: settings[device].y, device: device };
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add('is-dragging');
+    });
+    stage.addEventListener('pointermove', function (event) {
+      if (!dragging || dragging.id !== event.pointerId) return;
+      var bounds = stage.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      var v = settings[dragging.device];
+      v.x = Math.max(-50, Math.min(50, Math.round(dragging.x + (event.clientX - dragging.clientX) / bounds.width * 100)));
+      v.y = Math.max(-50, Math.min(50, Math.round(dragging.y + (event.clientY - dragging.clientY) / bounds.height * 100)));
+      paint();
+    });
+    function endDrag(event) {
+      if (!dragging || dragging.id !== event.pointerId) return;
+      dragging = null; stage.classList.remove('is-dragging');
+      if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+    }
+    stage.addEventListener('pointerup', endDrag);
+    stage.addEventListener('pointercancel', endDrag);
+    paint();
   }
 
   function readBannerForm(modal) {
@@ -3674,7 +3791,9 @@
       image: image,
       position: modal.querySelector('#bPosition').value,
       order: parseInt(modal.querySelector('#bOrder').value) || 1,
-      active: modal.querySelector('#bActive').checked
+      active: modal.querySelector('#bActive').checked,
+      image_settings: modal.querySelector('#bPosition').value === 'sidebar' ?
+        bannerImageSettings(modal._bannerImageSettings) : {}
     };
   }
 
@@ -3692,7 +3811,8 @@
       link: String(row.link || ''),
       position: String(row.position || 'hero'),
       order: Number(row.order || 1),
-      active: row.active === true
+      active: row.active === true,
+      image_settings: bannerImageSettings(row.image_settings)
     };
   }
 
@@ -3711,8 +3831,21 @@
       banner.image = url;
       return bannerApi('upsert', { banner: {
         slug: banner.id, title: banner.title, link: banner.link, image: banner.image,
-        position: banner.position, order: banner.order, active: banner.active
-      } });
+        position: banner.position, order: banner.order, active: banner.active,
+        image_settings: banner.position === 'sidebar' ? banner.image_settings : {}
+      } }).then(function () {
+        if (banner.position !== 'sidebar') return;
+        // Old Edge Functions silently ignore unknown settings. Check persistence
+        // before reporting success rather than showing a misleading Saved toast.
+        return bannerApi('list').then(function (result) {
+          var saved = (result.banners || []).find(function (b) { return b.slug === banner.id; });
+          if (!saved || !Object.prototype.hasOwnProperty.call(saved, 'image_settings') ||
+              JSON.stringify(bannerImageSettings(saved.image_settings)) !==
+                JSON.stringify(bannerImageSettings(banner.image_settings))) {
+            throw new Error('Image may have saved, but position settings did not persist. Apply the image-alignment SQL and deploy the updated Supabase Edge Function.');
+          }
+        });
+      });
     }).then(function () {
       modal.remove();
       toast(notice);
@@ -3842,7 +3975,7 @@
           banner.id = 'b' + Date.now();
           return bannerSaveFromModal(m, banner, 'Banner added to ' + placements[current].title + '.');
         });
-      initBannerImgUpload(modal);
+      initBannerImgUpload(modal, null);
     });
 
     $$('[data-edit-banner]', content).forEach(function (button) {
@@ -3856,7 +3989,7 @@
           updated.position = old.position;
           return bannerSaveFromModal(m, updated, 'Banner updated in ' + placements[current].title + '.');
         });
-        initBannerImgUpload(modal);
+        initBannerImgUpload(modal, old);
       });
     });
 

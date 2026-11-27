@@ -109,7 +109,7 @@ if (url.pathname.endsWith('/admin-homepage-sections')) {
       let body: Record<string, unknown>;
       try { body = JSON.parse(raw || '{}'); } catch { return reply({ error: 'Invalid JSON' }, 400, cors); }
       const list = async () => {
-        const { data, error } = await client.from('banners').select('slug,title,link,image,position,"order",active')
+        const { data, error } = await client.from('banners').select('slug,title,link,image,position,"order",active,image_settings')
           .order('order', { ascending: true }).order('slug', { ascending: true });
         if (error) { console.error('[admin-banners] list', error.code); return reply({ error: 'Banners table is not ready. Apply the secure banners SQL migration.' }, 503, cors); }
         return reply({ banners: data || [] }, 200, cors);
@@ -120,6 +120,27 @@ if (url.pathname.endsWith('/admin-homepage-sections')) {
         (v === '' || /^(?:[a-z0-9_-]+\.html(?:\?[a-z0-9_=&%-]+)?|https:\/\/[^\s"'<>]+)$/i.test(v));
       const validImage = (v: unknown) => typeof v === 'string' && v.length <= 1600 &&
         (/^assets\/img\/[a-z0-9_./-]+\.(?:png|jpg|jpeg|webp|svg)$/i.test(v) || /^https:\/\/[^\s"'<>]+$/i.test(v));
+      const cleanImageSettings = (value: unknown): Record<string, unknown> | null => {
+        if (value === undefined || value === null) return {};
+        if (typeof value !== 'object' || Array.isArray(value)) return null;
+        const obj = value as Record<string, unknown>;
+        if (Object.keys(obj).some(key => !['desktop', 'mobile'].includes(key))) return null;
+        const result: Record<string, unknown> = {};
+        for (const device of ['desktop', 'mobile']) {
+          const raw = obj[device];
+          if (raw === undefined) continue;
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+          const settings = raw as Record<string, unknown>;
+          if (Object.keys(settings).some(key => !['fit', 'zoom', 'x', 'y'].includes(key))) return null;
+          const fit = settings.fit === 'contain' ? 'contain' : settings.fit === 'cover' ? 'cover' : null;
+          const zoom = settings.zoom, x = settings.x, y = settings.y;
+          if (!fit || typeof zoom !== 'number' || !Number.isFinite(zoom) || zoom < .6 || zoom > 3 ||
+              typeof x !== 'number' || !Number.isFinite(x) || x < -50 || x > 50 ||
+              typeof y !== 'number' || !Number.isFinite(y) || y < -50 || y > 50) return null;
+          result[device] = { fit, zoom, x, y };
+        }
+        return result;
+      };
       const clean = (value: unknown) => {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
         const b = value as Record<string, unknown>;
@@ -127,10 +148,13 @@ if (url.pathname.endsWith('/admin-homepage-sections')) {
         const title = safe(b.title, 120);
         const position = String(b.position || '');
         const order = Number(b.order);
+        const imageSettings = cleanImageSettings(b.image_settings);
+        if (imageSettings === null) return null;
         if (!validSlug(slug) || !title || title.length > 120 || /[<>]/.test(title) ||
             !validImage(b.image) || !validLink(b.link) || !['hero', 'promo', 'sidebar'].includes(position) ||
             !Number.isInteger(order) || order < 1 || order > 100 || typeof b.active !== 'boolean') return null;
         return { slug, title, link: b.link || '', image: b.image, position, order, active: b.active,
+          image_settings: position === 'sidebar' ? imageSettings : {},
           updated_at: new Date().toISOString() };
       };
       if (body.action === 'upsert') {

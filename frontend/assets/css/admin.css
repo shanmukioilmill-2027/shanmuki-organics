@@ -1010,3 +1010,23 @@ textarea.field-input { resize: vertical; min-height: 80px; }
   .sidebar { width: min(285px, 90vw); }
   .page-toolbar { gap: 10px; }
 }
+
+/* Admin > Banners > Below Featured: viewport-specific drag/zoom image editor. */
+.banner-position-editor { margin-top:18px; border:1px solid #cddfca; background:#f8faf5; padding:16px; border-radius:12px; }
+.banner-position-editor[hidden] { display:none !important; }
+.banner-position-editor__head { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; color:#1e422d; }
+.banner-position-editor__head span, .banner-position-editor__tip { color:#596b5c; font-size:12px; line-height:1.5; }
+.banner-position-editor__tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.banner-position-editor__tabs button { padding:9px 14px; background:white; border:1px solid #cadcc8; border-radius:8px; cursor:pointer; color:#205534; font:inherit; font-size:13px; }
+.banner-position-editor__tabs button.is-active { background:#176a3a; border-color:#176a3a; color:white; }
+.banner-position-editor__stage-wrap { display:flex; align-items:center; justify-content:center; padding:12px 4px; background:#eaf1e5; border-radius:9px; }
+.banner-position-editor__stage { position:relative; width:100%; max-width:700px; aspect-ratio:6.55/1; overflow:hidden; border-radius:7px; background:#f5f2e8; cursor:grab; touch-action:none; user-select:none; box-shadow:0 1px 6px #0002; }
+.banner-position-editor__stage[data-device="mobile"] { max-width:360px; aspect-ratio:360/140; }
+.banner-position-editor__stage.is-dragging { cursor:grabbing; }
+.banner-position-editor__stage img { display:block; pointer-events:none; position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:center; max-width:none; max-height:none; transform-origin:center; }
+.banner-position-editor__fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:15px 0; }
+.banner-position-editor__fields label { font-size:12px; font-weight:600; color:#385542; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.banner-position-editor__fields input[type="range"] { width:100%; cursor:pointer; accent-color:#176a3a; }
+.banner-position-editor__fields output { font-weight:700; color:#176a3a; }
+.banner-position-editor__fields select.field-input { width:100%; min-width:0; }
+@media (max-width:600px) { .banner-position-editor { padding:12px; } .banner-position-editor__fields { grid-template-columns:1fr; } }

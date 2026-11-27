@@ -1082,10 +1082,28 @@
         dot.setAttribute('aria-current', index === belowIndex ? 'true' : 'false');
       });
     }
+    function bannerDisplayView(banner, device) {
+      var settings = banner && banner.image_settings;
+      var raw = settings && typeof settings === 'object' && settings[device] || {};
+      function bound(v, fallback, min, max) {
+        var n = typeof v === 'number' ? v : NaN;
+        return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+      }
+      return { fit: raw.fit === 'contain' ? 'contain' : 'cover',
+        zoom: bound(raw.zoom, 1, .6, 3),
+        x: bound(raw.x, 0, -50, 50), y: bound(raw.y, 0, -50, 50) };
+    }
+    function bannerImageStyle(b) {
+      var d = bannerDisplayView(b, 'desktop'), m = bannerDisplayView(b, 'mobile');
+      return '--banner-fit-desktop:' + d.fit + ';--banner-zoom-desktop:' + d.zoom +
+        ';--banner-x-desktop:' + d.x + '%;--banner-y-desktop:' + d.y + '%;' +
+        '--banner-fit-mobile:' + m.fit + ';--banner-zoom-mobile:' + m.zoom +
+        ';--banner-x-mobile:' + m.x + '%;--banner-y-mobile:' + m.y + '%;';
+    }
     function renderBelowFeatured(banners) {
       if (!sidebarZone || !belowTrack || !belowDots) return;
       var signature = banners.map(function (b) {
-        return [b.slug, b.title, b.link, b.image, b.order].join('~');
+        return [b.slug, b.title, b.link, b.image, b.order, JSON.stringify(b.image_settings || {})].join('~');
       }).join('|');
       if (signature === belowSignature) return; // preserve selected slide on live refresh
       belowSignature = signature;
@@ -1099,7 +1117,7 @@
         return '<a class="below-featured-slider__slide" href="' + esc(bannerHref(b.link)) +
           '" aria-label="' + esc(b.title || 'View collection') + '">' +
           '<img src="' + esc(b.image) + '" alt="' + esc(b.title || '') +
-          '" loading="' + (index ? 'lazy' : 'eager') + '"></a>';
+          '" style="' + bannerImageStyle(b) + '" loading="' + (index ? 'lazy' : 'eager') + '"></a>';
       }).join('');
       belowDots.innerHTML = banners.map(function (b, index) {
         return '<button type="button" class="below-featured-slider__dot' + (index === 0 ? ' is-active' : '') +
@@ -1214,8 +1232,14 @@
       return ensureSupabase().then(function () {
         if (!window.SupabaseClient) throw new Error('Supabase client unavailable');
         return window.SupabaseClient.from('banners')
-          .select('slug,title,link,image,position,"order",active').eq('active', true)
-          .order('order', { ascending: true });
+          .select('slug,title,link,image,position,"order",active,image_settings').eq('active', true)
+          .order('order', { ascending: true }).then(function (result) {
+            if (!result.error || !/image_settings/i.test(result.error.message || '')) return result;
+            // Existing banners stay visible even if the new SQL has not yet run.
+            return window.SupabaseClient.from('banners')
+              .select('slug,title,link,image,position,"order",active').eq('active', true)
+              .order('order', { ascending: true });
+          });
       }).then(function (result) {
         if (result.error) throw result.error;
         renderBanners(result.data || []);
