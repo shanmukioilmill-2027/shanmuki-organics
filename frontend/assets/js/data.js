@@ -560,10 +560,10 @@
     var old = originalCategories.get(row.slug) || {};
     return {
       slug: String(row.slug || ''),
-      parent_slug: row.parent_slug || null,
       name: String(row.name || old.name || row.slug || ''),
       ta: String(row.name_tamil || old.ta || ''),
       blurb: String(row.description || old.blurb || ''),
+      parent_slug: row.parent_slug || null,
       img: catalogImage(row.image_url || old.img || ''),
       image_alignment: categoryAlignment(row.image_alignment || old.image_alignment)
     };
@@ -763,7 +763,7 @@
       }
       var results = await Promise.all([
         client.from('categories')
-          .select('slug,name,name_tamil,description,image_url,image_alignment,order_index,parent_slug')
+          .select('slug,name,name_tamil,description,image_url,image_alignment,parent_slug,order_index')
           .order('order_index', { ascending: true }).range(0, 999),
         client.from('products')
           .select('id,slug,name,category_slug,price,unit,in_stock,image_url,description,mrp,admin_details')

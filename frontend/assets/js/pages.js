@@ -37,15 +37,57 @@
     });
   }
 
+  // Public, read-only choices saved in homepage_product_sections by an
+  // approved admin. Never use browser-local settings to override the live site.
+  let homepageProductChoices = null;
+  async function loadHomepageProductChoices() {
+    if (document.body.getAttribute('data-page') !== 'home') return;
+    const client = window.SupabaseClient;
+    if (!client || typeof client.from !== 'function') return;
+    const result = await client.from('homepage_product_sections')
+      .select('section_key,category_slugs,product_limit').in('section_key',['featured','bestseller']);
+    if (result.error) {
+      // Missing table = older deployment. Keep the original featured/bestseller
+      // behavior until its migration is applied. Other errors are visible.
+      if (['42P01','PGRST205','PGRST116'].includes(result.error.code)) return;
+      throw new Error('Homepage category settings: ' + result.error.message);
+    }
+    homepageProductChoices = {};
+    (result.data || []).forEach(function (row) {
+      if (row && ['featured','bestseller'].includes(row.section_key))
+        homepageProductChoices[row.section_key] = row;
+    });
+  }
+  function chosenHomepageProducts(spec) {
+    const settings = homepageProductChoices && homepageProductChoices[spec];
+    if (!settings || !Array.isArray(settings.category_slugs)) return null;
+    const matching = [], seen = new Set();
+    settings.category_slugs.forEach(function (categorySlug) {
+      SITE.products.forEach(function (p) {
+        if (!seen.has(p.slug) && categoryIsAncestor(categorySlug, p.cat)) {
+          seen.add(p.slug); matching.push(p);
+        }
+      });
+    });
+    if (spec === 'bestseller') matching.sort(function (a,b) {
+      return (Number(b.reviews) || 0) - (Number(a.reviews) || 0) ||
+        (Number(b.rating) || 0) - (Number(a.rating) || 0);
+    });
+    return matching;
+  }
+
   /* ============================================================ rails ==== */
   /* <div class="pgrid pgrid--4" data-rail="featured" data-limit="8"></div>   */
   function rails() {
     $$('[data-rail]').forEach(function (host) {
       const spec = host.getAttribute('data-rail');
-      const limit = parseInt(host.getAttribute('data-limit') || '0', 10);
+      const chosenSettings = homepageProductChoices && homepageProductChoices[host.getAttribute('data-rail')];
+      const limit = chosenSettings && Array.isArray(chosenSettings.category_slugs)
+        ? Number(chosenSettings.product_limit) || 4
+        : parseInt(host.getAttribute('data-limit') || '0', 10);
       let list = [];
-      if (spec === 'featured') list = SITE.featured();
-      else if (spec === 'bestseller') list = SITE.products.filter(function (p) { return p.bestseller; });
+      if (spec === 'featured') list = chosenHomepageProducts('featured') ?? SITE.featured();
+      else if (spec === 'bestseller') list = chosenHomepageProducts('bestseller') ?? SITE.products.filter(function (p) { return p.bestseller; });
       else if (spec === 'new') list = SITE.products.filter(function (p) { return p.isNew; });
       else if (spec === 'top') list = SITE.products.slice().sort(function (a, b) { return b.rating - a.rating || b.reviews - a.reviews; });
       else if (spec === 'recent') list = A.Recent.all();
@@ -54,7 +96,14 @@
       const skip = host.getAttribute('data-skip');
       if (skip) list = list.filter(function (p) { return p.slug !== skip; });
       if (limit) list = list.slice(0, limit);
-      if (!list.length) { const w = host.closest('[data-rail-wrap]'); if (w) w.classList.add('is-hidden'); return; }
+      if (!list.length) {
+        if (chosenSettings && Array.isArray(chosenSettings.category_slugs)) {
+          host.innerHTML = '<p class="small muted" role="status" style="grid-column:1/-1;padding:22px 0">No products are available in the selected categories yet.</p>';
+        } else {
+          const w = host.closest('[data-rail-wrap]'); if (w) w.classList.add('is-hidden');
+        }
+        return;
+      }
       host.innerHTML = list.map(function (p) { return card(p, { showCat: host.hasAttribute('data-showcat') }); }).join('');
     });
 
@@ -1505,6 +1554,17 @@
           warning.textContent = 'Live products could not be loaded from Supabase. Showing a local fallback. ' + (err.message || String(err));
           host.appendChild(warning);
         }
+      }
+    }
+    if (page === 'home') {
+      try { await loadHomepageProductChoices(); }
+      catch (error) {
+        // Never show arbitrary stale product picks when a configured read fails.
+        console.error('[SO] Homepage preferences unavailable:', error);
+        homepageProductChoices = {
+          featured: { category_slugs: [], product_limit: 4 },
+          bestseller: { category_slugs: [], product_limit: 4 }
+        };
       }
     }
     icons();

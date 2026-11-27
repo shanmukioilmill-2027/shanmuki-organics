@@ -458,7 +458,8 @@
     var titles = {
       dashboard: 'Dashboard', products: 'Products', categories: 'Categories',
       orders: 'Orders', payments: 'Payment Gateway', customers: 'Customers', reviews: 'Reviews',
-      coupons: 'Coupons', banners: 'Banners', content: 'Homepage Editor', reports: 'Reports', settings: 'Settings'
+      coupons: 'Coupons', banners: 'Banners', content: 'Homepage Editor', reports: 'Reports', settings: 'Settings',
+      'home-featured': 'Featured Products', 'home-bestseller': 'Best Selling This Month'
     };
     pageTitle.textContent = titles[page] || 'Dashboard';
     var renderers = {
@@ -467,7 +468,9 @@
       coupons: renderCoupons, banners: renderBanners, content: function () {
         if (window.AdminContent) window.AdminContent.render();
         else pageContent.innerHTML = '<p>Homepage editor resources are missing; redeploy plugins/cms/ and reload.</p>';
-      }, reports: renderReports, settings: renderSettings
+      }, reports: renderReports, settings: renderSettings,
+      'home-featured': function () { renderHomeProductSection('featured'); },
+      'home-bestseller': function () { renderHomeProductSection('bestseller'); }
     };
     (renderers[page] || renderDashboard)();
     window.scrollTo(0, 0);
@@ -4033,6 +4036,121 @@
       ctx.fillRect(lx, ly - 4, 8, 8);
       ctx.fillStyle = '#3f5045';
       ctx.fillText(s.label + ' ' + s.val + '%', lx + 12, ly + 4);
+    });
+  }
+
+  /* ============================== HOMEPAGE PRODUCT COLLECTIONS (v16) === */
+  // Categories are chosen by an approved admin and saved on the server;
+  // nothing is written to browser localStorage or to the product catalog.
+  var homeSectionLoadId = 0;
+  function renderHomeProductSection(sectionKey) {
+    var myId = ++homeSectionLoadId;
+    var pageKey = sectionKey === 'featured' ? 'home-featured' : 'home-bestseller';
+    var heading = sectionKey === 'featured' ? 'Featured Products' : 'Best Selling This Month';
+    content.innerHTML = '<p role="status">Loading ' + heading + ' settings and categories from Supabase…</p>';
+    Promise.all([
+      demoAdminRequest('admin-homepage-sections', { action: 'list' }),
+      fetchCategoriesFromSupabase(), fetchProductsFromSupabase()
+    ]).then(function (result) {
+      if (myId !== homeSectionLoadId || pageTitle.textContent !== heading) return;
+      var sections = result[0].sections || [];
+      var row = sections.find(function (s) { return s.section_key === sectionKey; }) || {};
+      var cats = result[1], products = result[2];
+      var selected = Array.isArray(row.category_slugs) ? row.category_slugs.slice() : [];
+      var limit = Number(row.product_limit) || 4;
+      var tree = orderedCategoryTree(cats);
+      var catsBySlug = {};
+      cats.forEach(function (c) { catsBySlug[c.slug] = c; });
+      function belongsTo(ancestor, productCategory) {
+        var seen = {}, slug = productCategory;
+        while (slug && !seen[slug]) {
+          if (slug === ancestor) return true;
+          seen[slug] = true;
+          slug = catsBySlug[slug] && catsBySlug[slug].parent_slug;
+        }
+        return false;
+      }
+      function includedProducts() {
+        var used = {};
+        var matching = [];
+        selected.forEach(function (slug) {
+          products.forEach(function (p) {
+            if (belongsTo(slug, p.cat) && !used[p.slug]) {
+              used[p.slug] = true; matching.push(p);
+            }
+          });
+        });
+        if (sectionKey === 'bestseller') matching.sort(function (a,b) {
+          return (b.reviews || 0) - (a.reviews || 0) || (b.rating || 0) - (a.rating || 0);
+        });
+        return matching;
+      }
+      content.innerHTML =
+        '<div class="page-toolbar"><h3>' + heading + ' — Homepage</h3>' +
+        '<button type="button" class="btn-sm" id="refreshHomeProducts">↻ Refresh</button></div>' +
+        '<p class="small muted">Choose Main Categories or Subcategories. A parent includes products from all its nested subcategories. Products must exist in Supabase to appear on the homepage.</p>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:18px;align-items:start">' +
+        '<section class="card"><div class="card__body" style="padding:20px">' +
+        '<h3 style="margin:0 0 15px;font-size:16px">Select Categories</h3>' +
+        '<div id="homeSectionCategories" style="display:grid;gap:10px;max-height:430px;overflow:auto;padding:4px">' +
+        tree.map(function (entry) {
+          var c = entry.category;
+          var count = products.filter(function (p) { return belongsTo(c.slug, p.cat); }).length;
+          return '<label style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid #e4eadf;border-radius:8px;cursor:pointer;margin-left:' + Math.min(entry.depth,8)*12 + 'px">' +
+            '<input type="checkbox" data-home-category="' + escHtml(c.slug) + '" ' + (selected.indexOf(c.slug) >= 0 ? 'checked' : '') + ' style="width:17px;height:17px;accent-color:#1b7139">' +
+            '<span style="flex:1">' + (entry.depth ? '↳ ' : '') + escHtml(c.name) + '</span>' +
+            '<small style="color:#849085">' + count + '</small></label>';
+        }).join('') + '</div>' +
+        '<p class="small muted" style="margin:14px 0">Select multiple categories; duplicate products are shown only once.</p>' +
+        '<label for="homeSectionLimit" style="display:block;margin-bottom:6px">Maximum Product Cards</label>' +
+        '<select id="homeSectionLimit" class="form-control" style="max-width:200px">' +
+        [4,8,12,16,24].map(function (x) { return '<option value="' + x + '"' + (limit === x ? ' selected' : '') + '>' + x + ' Products</option>'; }).join('') +
+        '</select><div style="margin-top:20px"><button type="button" id="saveHomeProducts" class="btn-sm btn-sm--primary">Save &amp; Publish</button></div>' +
+        '<p id="homeSectionStatus" role="status" class="small" style="margin-top:12px"></p>' +
+        '</div></section>' +
+        '<section class="card"><div class="card__body" style="padding:20px"><h3 style="margin:0 0 12px;font-size:16px">Homepage Preview</h3>' +
+        '<p id="homeProductCount" class="small muted"></p><div id="homeProductPreview" style="display:grid;gap:8px"></div>' +
+        '<p class="small muted" style="margin-top:14px">This is a preview of product names. The existing storefront product cards and layout remain unchanged.</p>' +
+        '</div></section></div>';
+      function refreshPreview() {
+        selected = $$('[data-home-category]', content).filter(function (el) { return el.checked; })
+          .map(function (el) { return el.getAttribute('data-home-category'); });
+        limit = Number($('#homeSectionLimit').value) || 4;
+        var allMatches = includedProducts();
+        $('#homeProductCount').textContent = selected.length + ' selected categories • ' + allMatches.length + ' matching products • showing up to ' + limit;
+        $('#homeProductPreview').innerHTML = allMatches.length ? allMatches.slice(0, limit).map(function (p) {
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #ebeee6;border-radius:8px">' +
+            '<div style="flex:1"><b>' + escHtml(p.name) + '</b><div class="small muted">' + escHtml((catsBySlug[p.cat] || {}).name || p.cat) + '</div></div></div>';
+        }).join('') : '<p class="small muted">No products in the selected categories yet.</p>';
+      }
+      $$('[data-home-category]', content).forEach(function (el) { el.addEventListener('change', refreshPreview); });
+      $('#homeSectionLimit').addEventListener('change', refreshPreview);
+      $('#refreshHomeProducts').addEventListener('click', function () { renderHomeProductSection(sectionKey); });
+      $('#saveHomeProducts').addEventListener('click', function () {
+        if (!selected.length) { toast('Please select at least one category.', 'warn'); return; }
+        var btn = $('#saveHomeProducts');
+        var status = $('#homeSectionStatus');
+        btn.disabled = true; btn.textContent = 'Publishing…';
+        status.textContent = '';
+        demoAdminRequest('admin-homepage-sections', {
+          action: 'save', section_key: sectionKey, category_slugs: selected, product_limit: limit
+        }).then(function (response) {
+          if (!response.saved) throw new Error('Save not confirmed by Supabase');
+          status.textContent = 'Saved to Supabase. Refresh the storefront homepage to view the published products.';
+          toast(heading + ' saved and published');
+        }).catch(function (err) {
+          status.textContent = 'Save failed: ' + (err.message || String(err));
+          toast(status.textContent, 'error');
+        }).finally(function () { btn.disabled = false; btn.textContent = 'Save & Publish'; });
+      });
+      refreshPreview();
+    }).catch(function (err) {
+      if (myId !== homeSectionLoadId || pageTitle.textContent !== heading) return;
+      content.innerHTML = '<div role="alert" style="padding:18px;border:1px solid #f0b2a5;background:#fff2ef;border-radius:10px">' +
+        '<h3>Could not load homepage settings</h3><p>' + escHtml(err.message || String(err)) + '</p>' +
+        '<p>Run the new homepage SQL migration and deploy the approved-admin Edge Function first.</p>' +
+        '<button class="btn-sm" id="retryHomeProducts">Retry</button></div>';
+      $('#retryHomeProducts').addEventListener('click', function () { renderHomeProductSection(sectionKey); });
     });
   }
 
