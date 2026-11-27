@@ -1039,6 +1039,12 @@
   /* ============================================================ PRODUCTS */
   function getProductFormHTML(p) {
     var cats = SITE ? SITE.categories : [];
+    var orderedCats = cats.filter(function (c) { return !c.parent_slug; });
+    orderedCats = orderedCats.reduce(function (out, parent) {
+      out.push(parent);
+      cats.filter(function (c) { return c.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
+      return out;
+    }, []);
     var isEdit = !!p;
     p = p || {};
     /* Image slots — dynamic (like size variants): saved images pre-filled,
@@ -1064,8 +1070,8 @@
       '<div class="form-row">' +
       '<div class="form-group"><label>Category *</label><select class="form-control" id="pCat">' +
       '<option value="">Select category</option>' +
-      cats.map(function (c) {
-        return '<option value="' + c.slug + '"' + (p.cat === c.slug ? ' selected' : '') + '>' + c.name + '</option>';
+      orderedCats.map(function (c) {
+        return '<option value="' + escHtml(c.slug) + '"' + (p.cat === c.slug ? ' selected' : '') + '>' + (c.parent_slug ? '↳ ' : '') + escHtml(c.name) + '</option>';
       }).join('') +
       '</select></div>' +
       '<div class="form-group"><label>Rating (1-5)</label><input class="form-control" id="pRating" type="number" min="1" max="5" step="0.1" placeholder="4.5" value="' + (p.rating || '') + '"></div>' +
@@ -1983,7 +1989,7 @@
   /* Category writes are backend-only. Browser localStorage is never proof of a save. */
   function upsertCategoryToSupabase(c, originalSlug) {
     return demoAdminRequest('admin-category-upsert', {
-      category: { slug: c.slug, name: c.name, ta: c.ta, blurb: c.blurb, img: c.img, image_alignment: safeCategoryAlignment(c.image_alignment) },
+      category: { slug: c.slug, name: c.name, ta: c.ta, blurb: c.blurb, img: c.img, parent_slug: c.parent_slug || null, image_alignment: safeCategoryAlignment(c.image_alignment) },
       originalSlug: originalSlug || null
     });
   }
@@ -1997,6 +2003,7 @@
         return {
           id: r.id, slug: r.slug, name: r.name || '', ta: r.name_tamil || '',
           blurb: r.description || '', img: r.image_url || '', icon: r.icon || '',
+          parent_slug: r.parent_slug || null,
           image_alignment: safeCategoryAlignment(r.image_alignment),
           order_index: r.order_index || 0
         };
@@ -2039,12 +2046,16 @@
     var catCounts = {};
     allProducts.forEach(function (p) { catCounts[p.cat] = (catCounts[p.cat] || 0) + 1; });
     var catPills = '<button class="cat-pill is-active" data-cat-filter="all">All <span class="cat-pill__count">' + allProducts.length + '</span></button>';
-    cats.forEach(function (c) {
+    var orderedCats = cats.filter(function (c) { return !c.parent_slug; }).reduce(function (out, parent) {
+      out.push(parent);
+      cats.filter(function (c) { return c.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
+      return out;
+    }, []);
+    orderedCats.forEach(function (c) {
       var count = catCounts[c.slug] || 0;
-      // Every saved Supabase category must appear as a Products filter, even with zero products.
-      // The category is available immediately when Products is opened/refreshed;
-      // a zero count does not mean the category is unavailable.
-      catPills += '<button type="button" class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' + escHtml(c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
+      if (!c.parent_slug) cats.filter(function (child) { return child.parent_slug === c.slug; }).forEach(function (child) { count += catCounts[child.slug] || 0; });
+      // Show every saved category, including empty subcategories. Main category includes its children.
+      catPills += '<button type="button" class="cat-pill" data-cat-filter="' + escHtml(c.slug) + '">' + (c.parent_slug ? '↳ ' : '') + escHtml(c.name) + ' <span class="cat-pill__count">' + count + '</span></button>';
     });
    
 
@@ -2062,7 +2073,12 @@
     var activeCat = 'all', activeQ = '';
     function applyFilters() {
       var list = allProducts;
-      if (activeCat !== 'all') list = list.filter(function (p) { return activeCat === '__custom__' ? p.custom : p.cat === activeCat; });
+      if (activeCat !== 'all') list = list.filter(function (p) {
+        if (activeCat === '__custom__') return p.custom;
+        if (p.cat === activeCat) return true;
+        var productCat = cats.find(function (c) { return c.slug === p.cat; });
+        return !!(productCat && productCat.parent_slug === activeCat);
+      });
       if (activeQ) list = list.filter(function (p) {
         return p.name.toLowerCase().indexOf(activeQ) > -1 || p.cat.toLowerCase().indexOf(activeQ) > -1;
       });
@@ -2199,13 +2215,25 @@
     });
   }
 
-  function getCategoryFormHTML(c) {
+  // A category may be a Main Category or a one-level Subcategory.
+  // Parent choices come from the approved-admin Supabase category list, never demo seeds.
+  function getCategoryFormHTML(c, cats, defaultParentSlug) {
     c = c || {};
+    cats = cats || [];
+    var parentSlug = c.parent_slug || defaultParentSlug || '';
+    var parentOptions = cats.filter(function (row) { return !row.parent_slug && row.slug !== c.slug; }).map(function (row) {
+      return '<option value="' + escHtml(row.slug) + '"' + (parentSlug === row.slug ? ' selected' : '') + '>' + escHtml(row.name) + '</option>';
+    }).join('');
     var hasImg = !!c.img;
     var categoryAlign = safeCategoryAlignment(c.image_alignment);
     var imgStyle = hasImg ? 'display:none;' : '';
     var previewStyle = hasImg ? 'display:block;' : 'display:none;';
-    return '<div class="form-group"><label>Category Name *</label><input class="form-control" id="catName" maxlength="120" placeholder="e.g. Spices" value="' + escHtml(c.name || '') + '"></div>' +
+    return '<div class="form-group"><label for="catType">Category Type *</label>' +
+      '<select class="form-control" id="catType"><option value="main"' + (!parentSlug ? ' selected' : '') + '>Main Category</option><option value="sub"' + (parentSlug ? ' selected' : '') + '>Subcategory</option></select></div>' +
+      '<div class="form-group" id="catParentWrap" style="' + (parentSlug ? '' : 'display:none;') + '"><label for="catParentSlug">Parent Category *</label>' +
+      '<select class="form-control" id="catParentSlug"><option value="">Select Main Category</option>' + parentOptions + '</select>' +
+      '<small style="display:block;margin-top:5px;color:#6a7c6f">This subcategory appears under the selected Main Category.</small></div>' +
+      '<div class="form-group"><label>Category Name *</label><input class="form-control" id="catName" maxlength="120" placeholder="e.g. Spices" value="' + escHtml(c.name || '') + '"></div>' +
       '<div class="form-group"><label>Tamil Name</label><input class="form-control" id="catTa" maxlength="150" placeholder="e.g. மசாலா பொருட்கள்" value="' + escHtml(c.ta || '') + '"></div>' +
       '<div class="form-group"><label>Description</label><textarea class="form-control" id="catDesc" maxlength="2000" placeholder="Brief description...">' + escHtml(c.blurb || '') + '</textarea></div>' +
       '<div class="form-group"><label>Category Image</label>' +
@@ -2224,6 +2252,22 @@
       '<span id="catImgInfo" style="font-size:11px;color:#6f7d72">Click image to zoom/move inside the fixed circle</span>' +
       '<button type="button" id="catImgRemove" style="font-size:11px;font-weight:600;color:#dc3545;background:none;border:none;cursor:pointer;padding:2px 6px">✕ Remove</button>' +
       '</div><div style="padding:6px 12px;background:#f8f9f6;text-align:center"><button type="button" id="catImgAdjust" style="color:#176b37;border:1px solid #9abb9e;padding:7px 12px;background:white;border-radius:7px;cursor:pointer">↗ Adjust Image Size &amp; Position</button></div></div></div>';
+  }
+
+
+  function initCategoryHierarchyFields(modal) {
+    var kind = modal.querySelector('#catType');
+    var parent = modal.querySelector('#catParentSlug');
+    var wrap = modal.querySelector('#catParentWrap');
+    function update() {
+      var isSub = kind.value === 'sub';
+      wrap.style.display = isSub ? '' : 'none';
+      parent.required = isSub;
+      parent.disabled = !isSub;
+      if (!isSub) parent.value = '';
+    }
+    kind.addEventListener('change', update);
+    update();
   }
 
   function initCategoryImageUpload(modal) {
@@ -2436,10 +2480,16 @@
     var desc = modal.querySelector('#catDesc').value.trim();
     var img = modal.querySelector('#catImg').value || '';
     var image_alignment = categoryAlignmentFromForm(modal);
+    var isSub = modal.querySelector('#catType').value === 'sub';
+    var parent_slug = isSub ? modal.querySelector('#catParentSlug').value : null;
     if (!name) { toast('Category name is required', 'error'); return null; }
-    var slug = originalSlug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
-    if (!slug) { toast('Use an English category name or a valid slug.', 'error'); return null; }
-    return { name: name, ta: ta, blurb: desc, img: img, slug: slug, image_alignment: image_alignment };
+    if (isSub && !parent_slug) { toast('Select a Parent Category for the subcategory.', 'error'); return null; }
+    // Child slugs use the parent prefix to avoid duplicate subcategory names under different parents.
+    var baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    var slug = originalSlug || (parent_slug ? parent_slug + '-' + baseSlug : baseSlug);
+    if (!slug || slug.length > 90) { toast('Use a shorter English category name.', 'error'); return null; }
+    if (slug === parent_slug) { toast('Category cannot be its own parent.', 'error'); return null; }
+    return { name: name, ta: ta, blurb: desc, img: img, slug: slug, parent_slug: parent_slug, image_alignment: image_alignment };
   }
 
   // openModal is synchronous: returning false keeps the dialog on screen until
@@ -2464,36 +2514,49 @@
 
   function renderCategoriesWithData(cats) {
     var products = (SITE && SITE.products) || [];
+    var groupedCats = cats.filter(function (c) { return !c.parent_slug; }).reduce(function (out, parent) {
+      out.push(parent);
+      cats.filter(function (child) { return child.parent_slug === parent.slug; }).forEach(function (child) { out.push(child); });
+      return out;
+    }, []);
     content.innerHTML =
       '<div class="page-toolbar">' +
       '<h3 style="font-size:15px;font-weight:600">Manage ' + cats.length + ' categories (Supabase)</h3>' +
       '<button class="btn-sm" id="refreshCatsBtn">↻ Refresh</button>' +
-      '<button class="btn-sm btn-sm--primary" id="addCatBtn">+ Add Category</button>' +
+      '<button class="btn-sm btn-sm--primary" id="addCatBtn">+ Add Category / Subcategory</button>' +
       '</div>' +
       '<p role="status" class="small muted">Connected to the approved-admin backend. Category changes are saved to Supabase, not only this browser. Unsynced older local edits are not automatically uploaded.</p>' +
       '<div class="card"><div class="card__body" style="padding:0;overflow-x:auto">' +
-      '<table class="admin-table"><thead><tr><th>#</th><th>Image</th><th>Category</th><th>Tamil Name</th><th>Slug</th><th>Products*</th><th>Actions</th></tr></thead>' +
-      '<tbody>' + cats.map(function (c, i) {
+      '<table class="admin-table"><thead><tr><th>#</th><th>Image</th><th>Category</th><th>Parent Category</th><th>Tamil Name</th><th>Slug</th><th>Products*</th><th>Actions</th></tr></thead>' +
+      '<tbody>' + groupedCats.map(function (c, i) {
         var count = products.filter(function (p) { return p.cat === c.slug; }).length;
         var imgCell = c.img
           ? '<img src="' + escHtml(c.img) + '" alt="' + escHtml(c.name) + '" style="width:40px;height:40px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #e2e8e0;display:block">'
           : '<span aria-label="No image">—</span>';
-        return '<tr><td>' + (i + 1) + '</td><td>' + imgCell + '</td><td><b>' + escHtml(c.name) + '</b></td><td>' + escHtml(c.ta) + '</td><td><code>' + escHtml(c.slug) + '</code></td><td>' + count + '</td>' +
-          '<td><button class="btn-sm" data-edit-cat="' + escHtml(c.slug) + '">✏️ Edit</button> <button class="btn-sm btn-sm--danger" data-delete-cat="' + escHtml(c.slug) + '">🗑️</button></td></tr>';
+        var parent = cats.find(function (row) { return row.slug === c.parent_slug; });
+        return '<tr><td>' + (i + 1) + '</td><td>' + imgCell + '</td><td>' + (c.parent_slug ? '↳ ' : '') + '<b>' + escHtml(c.name) + '</b></td><td>' + (parent ? escHtml(parent.name) : '—') + '</td><td>' + escHtml(c.ta) + '</td><td><code>' + escHtml(c.slug) + '</code></td><td>' + count + '</td>' +
+          '<td><button class="btn-sm" data-edit-cat="' + escHtml(c.slug) + '">✏️ Edit</button> ' +
+          (!c.parent_slug ? '<button class="btn-sm" data-add-sub="' + escHtml(c.slug) + '">+ Subcategory</button> ' : '') +
+          '<button class="btn-sm btn-sm--danger" data-delete-cat="' + escHtml(c.slug) + '">🗑️</button></td></tr>';
       }).join('') +
       '</tbody></table><p class="small muted" style="padding:8px 12px">* Product counts use the current browser catalog; the server also checks DB references before deletion.</p></div></div>';
 
     $('#refreshCatsBtn').addEventListener('click', renderCategories);
-    $('#addCatBtn').addEventListener('click', function () {
-      var modal = openModal('Add Category', getCategoryFormHTML(), function (m) {
+    function openAddCategory(parentSlug) {
+      var modal = openModal(parentSlug ? 'Add Subcategory' : 'Add Category', getCategoryFormHTML(null, cats, parentSlug), function (m) {
         var category = categoryPayload(m, null);
         if (!category) return false;
         if (cats.some(function (c) { return c.slug === category.slug; })) {
           toast('A category with this slug already exists.', 'error'); return false;
         }
-        return categorySaveInModal(m, upsertCategoryToSupabase(category), 'Category added to Supabase successfully!');
+        return categorySaveInModal(m, upsertCategoryToSupabase(category), 'Category saved to Supabase successfully!');
       });
+      initCategoryHierarchyFields(modal);
       initCategoryImageUpload(modal);
+    }
+    $('#addCatBtn').addEventListener('click', function () { openAddCategory(null); });
+    $$('[data-add-sub]', content).forEach(function (btn) {
+      btn.addEventListener('click', function () { openAddCategory(btn.getAttribute('data-add-sub')); });
     });
 
     $$('[data-edit-cat]', content).forEach(function (btn) {
@@ -2501,11 +2564,12 @@
         var slug = btn.getAttribute('data-edit-cat');
         var cat = cats.find(function (c) { return c.slug === slug; });
         if (!cat) return;
-        var modal = openModal('Edit Category', getCategoryFormHTML(cat), function (m) {
+        var modal = openModal('Edit Category', getCategoryFormHTML(cat, cats), function (m) {
           var category = categoryPayload(m, slug); // Keep original slug: linked products depend on it.
           if (!category) return false;
           return categorySaveInModal(m, upsertCategoryToSupabase(category, slug), 'Category updated in Supabase!');
         });
+        initCategoryHierarchyFields(modal);
         initCategoryImageUpload(modal);
       });
     });
@@ -2517,6 +2581,7 @@
         if (!cat) return;
         var count = products.filter(function (p) { return p.cat === slug; }).length;
         if (count) { toast('Cannot delete: ' + count + ' products use this category.', 'error'); return; }
+        if (cats.some(function (c) { return c.parent_slug === slug; })) { toast('Move or delete its subcategories before deleting this Main Category.', 'error'); return; }
         openModal('Delete Category',
           '<p>Delete <b>' + escHtml(cat.name) + '</b> from Supabase? This cannot be undone.</p>',
           function (m) {

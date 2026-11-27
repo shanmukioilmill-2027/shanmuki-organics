@@ -56,8 +56,12 @@
         host.appendChild(track);
       }
 
-      track.innerHTML = SITE.categories.map(function (c) {
-        const n = SITE.incat(c.slug).length;
+      const visibleCategories = SITE.categories.filter(function (c) { return !c.parent_slug; });
+      track.innerHTML = visibleCategories.map(function (c) {
+        const n = SITE.products.filter(function (p) {
+          if (p.cat === c.slug) return true;
+          return SITE.categories.some(function (child) { return child.slug === p.cat && child.parent_slug === c.slug; });
+        }).length;
         const imgSrc = c.img ? c.img : 'assets/img/categories/' + c.slug + '.svg';
         const imgStyle = c.img ? 'width:100%;height:100%;object-fit:contain;object-position:center;transform:none;background:transparent' : '';
         const fallback = 'assets/img/categories/' + c.slug + '.svg';
@@ -103,7 +107,7 @@
          so all the categories pass through the view and a slide is never blank. */
       if (slides) {
         try {
-          const total = SITE.categories.length;
+          const total = visibleCategories.length;
           // Match the visible circle count to the CSS breakpoint.
           const getVisible = function () { return window.innerWidth <= 540 ? 2 : window.innerWidth <= 1180 ? 3 : 5; };
           if (total > 2) {
@@ -155,7 +159,7 @@
         } catch (e) { console.error('[catcarousel] failed:', e); }
       }
       /* Version marker — confirms the fresh renderer + how many cards painted */
-      console.log('[SO] pages.js v6 — painted ' + SITE.categories.length + ' category circles');
+      console.log('[SO] categories — painted ' + visibleCategories.length + ' root category circles');
     });
   }
 
@@ -249,11 +253,18 @@
 
     const catbox = $('[data-f-cats]');
     if (catbox) {
-      catbox.innerHTML = SITE.categories.map(function (c) {
+      const categoryOptions = SITE.categories.filter(function (c) { return !c.parent_slug; }).reduce(function (out, main) {
+        out.push(main);
+        SITE.categories.filter(function (c) { return c.parent_slug === main.slug; }).forEach(function (child) { out.push(child); });
+        return out;
+      }, []);
+      catbox.innerHTML = categoryOptions.map(function (c) {
         return '<label class="check"><input type="checkbox" value="' + c.slug + '"' +
           (state.cats.indexOf(c.slug) > -1 ? ' checked' : '') + '>' +
-          '<span>' + esc(c.name) + '<span class="ta">' + esc(c.ta) + '</span></span>' +
-          '<small>' + SITE.incat(c.slug).length + '</small></label>';
+          '<span>' + (c.parent_slug ? '↳ ' : '') + esc(c.name) + '<span class="ta">' + esc(c.ta) + '</span></span>' +
+          '<small>' + SITE.products.filter(function (p) {
+            return p.cat === c.slug || (!c.parent_slug && SITE.categories.some(function (child) { return child.slug === p.cat && child.parent_slug === c.slug; }));
+          }).length + '</small></label>';
       }).join('');
     }
 
@@ -266,7 +277,10 @@
     function apply() {
       let list = SITE.products.slice();
       if (state.q) list = A.searchIndex(state.q);
-      if (state.cats.length) list = list.filter(function (p) { return state.cats.indexOf(p.cat) > -1; });
+      if (state.cats.length) list = list.filter(function (p) {
+        if (state.cats.indexOf(p.cat) > -1) return true;
+        return SITE.categories.some(function (child) { return child.slug === p.cat && state.cats.indexOf(child.parent_slug) > -1; });
+      });
       if (state.tag) list = list.filter(function (p) { return p.tags.indexOf(state.tag) > -1; });
       list = list.filter(function (p) { return p.price >= state.min && p.price <= state.max; });
       if (state.rating) list = list.filter(function (p) { return p.rating >= state.rating; });
