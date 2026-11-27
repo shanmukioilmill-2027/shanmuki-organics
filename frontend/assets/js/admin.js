@@ -2257,8 +2257,8 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Photo Size Sync v7: The outer category circle remains fixed. Move or resize only the uploaded photo; at 80% the storefront uses the same 80% photo size. One original image, no blurred copy. Apply Alignment, then Save.</p>' +
-          '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Fixed storefront circle — move the image inside</div>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">Same Admin + Storefront Preview (v8): Only the PHOTO moves and zooms within the fixed circle. 50% is the minimum zoom that fills the circle; larger values zoom in. Admin and storefront use the same rendering code. Apply Alignment, then Save.</p>' +
+          '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Fixed circle — zoom and move only the PHOTO (v8)</div>' +
           '<div data-cat-align-stage style="background:#fff;border:0;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative;box-shadow:0 0 0 1px #d7e2d4"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:cover;border-radius:0;display:block;pointer-events:none;transform-origin:center center"></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
             '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
@@ -2270,6 +2270,12 @@
         '</div>';
       document.body.appendChild(layer);
       var stage = layer.querySelector('[data-cat-align-stage]');
+      if (!SITE || SITE.categoryPhotoRendererVersion !== 'v8-fixed-cover-20261127') {
+        var message = document.createElement('p');
+        message.style.cssText = 'color:#b42318;background:#fff2f0;padding:9px;border-radius:6px;margin:6px 0';
+        message.textContent = 'Category preview version mismatch. Refresh this Admin page and verify data.js/admin.js have both been deployed (v8).';
+        layer.querySelector('[data-cat-align-stage]').parentElement.insertBefore(message, layer.querySelector('[data-cat-align-stage]'));
+      }
       var image = layer.querySelector('[data-cat-align-image]');
       var s = layer.querySelector('[data-cat-align-scale]');
       var x = layer.querySelector('[data-cat-align-x]');
