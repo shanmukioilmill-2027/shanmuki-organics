@@ -2257,8 +2257,9 @@
       layer.innerHTML =
         '<div style="background:#fff;border-radius:14px;max-width:940px;width:100%;max-height:95vh;overflow:auto;padding:20px;box-shadow:0 20px 70px #0005">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px"><h3 style="margin:0;font-size:20px">Category Image Alignment</h3><button type="button" data-cat-align-cancel aria-label="Close" style="font-size:24px;border:0;background:transparent;cursor:pointer">×</button></div>' +
-          '<p style="margin:0 0 12px;color:#647468;font-size:13px">The entire uploaded image stays visible. Adjust its size and position; movement and zoom are limited so no edge gets cut. Storefront category images remain circular.</p>' +
-          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:14px;overflow:hidden;width:min(100%,460px);margin:0 auto;aspect-ratio:460/420;cursor:grab;touch-action:none;user-select:none"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Category alignment preview" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;transform-origin:center center"></div>' +
+          '<p style="margin:0 0 12px;color:#647468;font-size:13px">This is the actual circular storefront preview. The rectangular photo stays fitted, with a soft same-photo background filling the circle. Drag or use the sliders to adjust the image.</p>' +
+          '<div style="text-align:center;font-size:12px;font-weight:600;color:#526c56;margin-bottom:8px">Storefront category circle preview</div>' +
+          '<div data-cat-align-stage style="background:#fff;border:1px solid #d7e2d4;border-radius:50%;overflow:hidden;width:min(100%,420px);margin:0 auto;aspect-ratio:1/1;cursor:grab;touch-action:none;user-select:none;position:relative"><img data-cat-align-image src="' + escHtml(imgUrl) + '" alt="Circular category preview" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;transform-origin:center center"></div>' +
           '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:16px 0">' +
             '<label style="display:grid;gap:6px;font-size:13px">Image Size <output data-cat-align-scale-label></output><input data-cat-align-scale type="range" min="50" max="160" step="1"></label>' +
             '<label style="display:grid;gap:6px;font-size:13px">Left / Right <output data-cat-align-x-label></output><input data-cat-align-x type="range" min="-50" max="50" step="1"></label>' +
@@ -2275,7 +2276,7 @@
       var y = layer.querySelector('[data-cat-align-y]');
       function paint() {
         if (SITE && typeof SITE.fitCategoryImage === 'function') {
-          SITE.fitCategoryImage(image, alignment, false);
+          SITE.fitCategoryImage(image, alignment, true);
         }
         s.value = alignment.scale;
         x.value = alignment.x;

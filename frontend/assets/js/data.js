@@ -695,6 +695,38 @@
       dx = Math.max(-maxDx, Math.min(maxDx, dx));
     }
     host.style.position = 'relative';
+    if (circle) {
+      // The source is rectangular. A soft circular ambient layer fills the ring
+      // while the actual uploaded image remains fully fitted in the foreground.
+      // This removes the harsh square-on-white appearance without cropping the
+      // image file or introducing a second saved image.
+      host.style.overflow = 'hidden';
+      host.style.borderRadius = '50%';
+      host.style.backgroundColor = '#fff';
+      var ambience = host.querySelector('[data-category-ambient]');
+      if (!ambience) {
+        ambience = document.createElement('span');
+        ambience.setAttribute('data-category-ambient', '');
+        ambience.setAttribute('aria-hidden', 'true');
+        ambience.style.cssText = 'position:absolute;inset:5px;display:block;border-radius:50%;pointer-events:none;overflow:hidden;z-index:0';
+        host.insertBefore(ambience, img);
+      }
+      ambience.style.backgroundImage = 'url(' + JSON.stringify(img.getAttribute('src') || '') + ')';
+      ambience.style.backgroundSize = 'cover';
+      ambience.style.backgroundPosition = 'center';
+      ambience.style.backgroundRepeat = 'no-repeat';
+      ambience.style.filter = 'blur(3px)';
+      ambience.style.opacity = '.78';
+      img.style.zIndex = '1';
+      // Feather only the rectangular photo edges. The middle remains sharp,
+      // while the underlying same-photo circular fill covers the remaining area.
+      img.style.webkitMaskImage = 'radial-gradient(ellipse, #000 62%, transparent 100%)';
+      img.style.maskImage = 'radial-gradient(ellipse, #000 62%, transparent 100%)';
+    } else {
+      img.style.webkitMaskImage = 'none';
+      img.style.maskImage = 'none';
+      img.style.zIndex = '';
+    }
     img.style.position = 'absolute';
     img.style.width = w + 'px';
     img.style.height = h + 'px';

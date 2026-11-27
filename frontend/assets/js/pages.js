@@ -70,6 +70,8 @@
       track.querySelectorAll('img[data-fallback]').forEach(function (img) {
         img.addEventListener('error', function () {
           img.removeAttribute('data-category-fit');
+          var ambient = img.parentElement && img.parentElement.querySelector('[data-category-ambient]');
+          if (ambient) ambient.remove();
           img.src = img.getAttribute('data-fallback');
           img.style.cssText = '';
         });
