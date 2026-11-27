@@ -684,7 +684,13 @@
     // frame diameter so a 420px editor preview matches a 200px category tile.
     if (circle) {
       var diameter = Math.min(frameW, frameH);
-      var imageSize = diameter * a.scale / 100;
+      // Product-photo safety margin: at slider 100%, show the single image at
+      // 90% of the circular frame. This leaves space for caps near the top of
+      // the original photo. Slider values retain their linear relationship:
+      // lowering Image Size in Admin lowers it by the same ratio on storefront.
+      // Both contexts call this same function; never duplicate or blur the photo.
+      var SAFE_CIRCLE_IMAGE_FIT = 0.90;
+      var imageSize = diameter * SAFE_CIRCLE_IMAGE_FIT * a.scale / 100;
       var xOffset = diameter * a.x / 200;
       var yOffset = diameter * a.y / 200;
       host.style.overflow = 'hidden';
@@ -780,7 +786,7 @@
 
   /* Version marker — lets us verify in the console (F12) which copy of
      data.js the browser is actually running. */
-  console.log('[SO] data.js v5 loaded — ' + categories.length + ' categories, ' + products.length + ' products');
+  console.log('[SO] data.js v6 (category safe-fit) loaded — ' + categories.length + ' categories, ' + products.length + ' products');
 
   /* ---- merge admin-added custom categories from localStorage into SITE ---- */
   try {
